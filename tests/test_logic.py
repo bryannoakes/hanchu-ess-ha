@@ -182,11 +182,12 @@ def test_auto_watt_small_value_misscaled_only_without_unit():
     assert s.native_value == 8000.0
 
 
-def test_load_power_is_raw_watts():
-    # load_power reads loadPwr, which has no `<field>Unit` sibling and is always
-    # reported in watts, so it is surfaced raw (no auto_watt, no misscale).
-    s = _make_sensor(SENSORS["load_power"], 8)
-    assert s.native_value == 8
+def test_load_power_uses_combined_eps_load_with_explicit_unit():
+    # HESS-HY-S-12K-S can report loadPwr=0 while loadEpsPwr carries the actual
+    # backed-house load. Use loadEpsPwr and its explicit unit so the live power
+    # balance matches battery + grid input.
+    s = _make_sensor(SENSORS["load_power"], 903.3, unit="W")
+    assert s.native_value == 903.3
 
 
 def test_auto_watt_non_numeric_returns_none():
