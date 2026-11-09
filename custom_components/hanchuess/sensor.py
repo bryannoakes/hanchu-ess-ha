@@ -113,11 +113,13 @@ SENSORS = {
         "derive_mode": "negative_as_positive",
     },
     "load_power": {
-        "key": "loadPwr",
+        "key": "loadEpsPwr",
         "device_class": SensorDeviceClass.POWER,
         "state_class": SensorStateClass.MEASUREMENT,
         "unit": UnitOfPower.WATT,
         "icon": "mdi:home-lightning-bolt",
+        "auto_watt": True,
+        "unit_key": "loadEpsPwrUnit",
     },
     "dg_power": {
         "key": "dgPAcTotal",
