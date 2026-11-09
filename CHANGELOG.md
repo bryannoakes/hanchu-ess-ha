@@ -15,6 +15,9 @@ later versions are tracked here going forward.
   succeeds but `/app/ha/getDeviceList` returns no devices. The supplied serial
   is validated with `getDeviceStatus`, after which the existing station and
   automatic battery discovery flow continues unchanged.
+- Live load power now uses `loadEpsPwr` and its explicit unit. On the
+  HESS-HY-S-12K-S, `loadPwr` can remain zero while `loadEpsPwr` reports the
+  actual backed-house load; this previously made Home Assistant show 0 W load.
 
 ## [2.3.0] - 2026-11-04
 
