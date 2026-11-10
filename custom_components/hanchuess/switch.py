@@ -6,6 +6,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.entity import DeviceInfo
 from .models import inverter_model_name
 from .const import DOMAIN, CONF_FAST_CHARGE_DURATION, DEFAULT_FAST_CHARGE_DURATION
+from .settings_12k import is_12k_s
 from . import HanchuessConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
@@ -24,6 +25,13 @@ def _fast_charge_duration(entry) -> int:
 async def async_setup_entry(
     hass: HomeAssistant, entry: HanchuessConfigEntry, async_add_entities: AddEntitiesCallback
 ):
+    if is_12k_s(entry):
+        _LOGGER.info(
+            "[HANCHUESS] Fast charge/discharge controls disabled for HESS-HY-S-12K-S "
+            "during read-only model validation"
+        )
+        return
+
     data = entry.runtime_data
     client = data.realtime.client
     async_add_entities([
