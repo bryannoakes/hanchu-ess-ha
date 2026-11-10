@@ -180,5 +180,6 @@ async def test_ws_iot_set_failure_does_not_sync_entities():
         )
 
     connection.send_error.assert_called_once_with(1, "control_failed", "Device error")
-    mock_find_entry.assert_not_called()
+    # The model-29 write guard looks the entry up once; the success-path sync must not.
+    assert mock_find_entry.call_count == 1
     mock_apply.assert_not_called()

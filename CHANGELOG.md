@@ -19,6 +19,11 @@ later versions are tracked here going forward.
   server-side write paths are blocked for model 29 during validation.
 
 ### Fixed
+- HESS-HY-S-12K-S read-only settings sensors were never added to Home Assistant:
+  they used `EntityCategory.CONFIG`, which HA rejects for sensors, so all 40
+  showed unavailable. They now use the diagnostic category. A fresh login under
+  both `appPlat: ha` and `appPlat: iess` returns identical, current values from
+  `deviceNew/iotGet`, so no cloud-side staleness was found.
 - HESS-HY-S-12K-S Read Settings now refreshes a dedicated on-demand settings
   coordinator, so model-29 read-only setting sensors update after the button is
   pressed instead of retaining only their startup values.
