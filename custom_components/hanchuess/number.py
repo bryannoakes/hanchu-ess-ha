@@ -59,7 +59,7 @@ async def async_setup_entry(
         _LOGGER.info("[HANCHUESS] Skipping generic number controls for HESS-HY-S-12K-S")
         settings = entry.runtime_data.settings
         if settings is not None:
-            async_add_entities([HanchuessStopChargeSocNumber(entry, settings)])
+            async_add_entities(build_entities(entry, settings, ('int','float')))
         return
 
     data = entry.runtime_data
@@ -142,45 +142,3 @@ class HanchuessNumber(NumberEntity):
             self._config["name"],
             value,
         )
-
-
-class HanchuessStopChargeSocNumber(CoordinatorEntity, NumberEntity):
-    """Model-29 battery stop-charge SOC (chgSocLmt); the only writable 12K-S setting."""
-
-    _attr_has_entity_name = True
-    _attr_name = "Battery SOC Stop Charge Limit"
-    _attr_icon = "mdi:battery-high"
-    _attr_native_unit_of_measurement = PERCENTAGE
-    _attr_mode = NumberMode.BOX
-    _attr_entity_category = EntityCategory.CONFIG
-
-    def __init__(self, entry, coordinator):
-        super().__init__(coordinator)
-        self._entry = entry
-        sn = entry.data["sn"]
-        self._attr_unique_id = f"{sn}_setting_write_chgSocLmt"
-        spec = WRITABLE_SETTINGS["chgSocLmt"]
-        self._attr_native_min_value = spec["min"]
-        self._attr_native_max_value = spec["max"]
-        self._attr_native_step = spec["step"]
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        sn = self._entry.data["sn"]
-        return DeviceInfo(
-            identifiers={(DOMAIN, sn)},
-            name=f"Hanchuess {sn}",
-            manufacturer="Hanchu",
-            model=inverter_model_name(self._entry),
-        )
-
-    @property
-    def native_value(self):
-        raw = (self.coordinator.data or {}).get("chgSocLmt")
-        try:
-            return float(raw)
-        except (TypeError, ValueError):
-            return None
-
-    async def async_set_native_value(self, value: float) -> None:
-        await self.coordinator.async_write_setting("chgSocLmt", value)

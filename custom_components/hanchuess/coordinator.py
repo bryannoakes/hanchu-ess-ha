@@ -151,6 +151,8 @@ def _same(raw, sent) -> bool:
     if isinstance(sent, str):
         return str(raw).strip() == sent
     try:
+        if isinstance(sent, float):
+            return abs(float(raw) - sent) < 1e-6
         return int(float(raw)) == sent
     except (TypeError, ValueError):
         return False

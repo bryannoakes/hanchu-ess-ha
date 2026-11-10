@@ -171,29 +171,92 @@ def decode_setting_value(key: str, raw, dynamic_options: dict | None = None):
 
 
 # ---------------------------------------------------------------------------
-# Writes.  Strict allow-list: only keys whose native write semantics were
-# captured AND live-validated may be written.  Everything else (including all
-# grid-sell/export related options) is refused.  See docs/model29-write-plan.md.
+# Writes.  Strict allow-list built from the model-29 HA menu metadata
+# (/gateway/app/ha/menu: min_val/max_val/optVal) and live iESS captures.
+# Anything not listed here (power on/off, restart, password, N-PE, P-PF curve,
+# date/time, ...) is refused.  See docs/model29-write-plan.md.
+#
+# Wire format (captured from the native iESS app and live-validated):
+#   POST /platform/deviceNew/iotSet  {"devType":"2","sn":..,"value":{key: v}}
+#   bool/int/enum -> JSON integer; voltages -> JSON number; times -> "HHMM" STRING
+#   (integer times are rejected by the device).
 # ---------------------------------------------------------------------------
-WRITABLE_SETTINGS: dict[str, dict] = {
-    # Captured from the iESS UI: {"value": {"chgSocLmt": 97}}; UI range [50, 100].
-    "chgSocLmt": {"kind": "int", "min": 50, "max": 100, "step": 1},
-    # Live-validated: {"timedDischargeEnable": 0|1} (ints).  Timed *charge* is
-    # deliberately NOT enabled: it can pull from the grid.
-    "timedDischargeEnable": {"kind": "bool"},
-    # Live-validated: times must be "HHMM" STRINGS ("0300"); integers (300), which
-    # the iESS UI sends, are rejected by the device with result code 2.
-    "startDischgTime1": {"kind": "hhmm"},
-    "endDischgTime1": {"kind": "hhmm"},
+GRID_EXPORT_REFUSED: dict[str, set[int]] = {
+    # Export is disabled for this installation: never allow these option values.
+    "workMode": {1},               # On Grid (allows export)
+    "batDischgManagement": {3},    # Battery to grid sell
+    "pvChargingPriority": {2},     # First to grid
 }
+
+ENUM_OPTIONS: dict[str, dict[int, str]] = {
+    "workMode": {1: "On Grid", 2: "Limit power to UPS load", 3: "Limit power to home load"},
+    "batDischgManagement": {
+        0: "Standby", 1: "Battery to UPS load", 2: "Battery to home load",
+        3: "Battery to grid sell",
+    },
+    "pvChargingPriority": {0: "First to Load", 1: "First to charging", 2: "First to grid"},
+}
+for _slot in (1, 2, 3):
+    ENUM_OPTIONS[f"timePeriod{_slot}StopChargingEnergySource"] = {
+        0: "None", 1: "Grid charging", 2: "GEN charging", 3: "Grid GEN charging",
+    }
+
+WRITABLE_SETTINGS: dict[str, dict] = {
+    "chgSocLmt": {"kind": "int", "min": 50, "max": 100, "step": 1,
+                  "name": "Battery SOC Stop Charge Limit", "unit": "%"},
+    "gridCharging": {"kind": "bool", "name": "Grid Charging Control"},
+    "timedChargeEnable": {"kind": "bool", "name": "Timed Charge Control"},
+    "timedDischargeEnable": {"kind": "bool", "name": "Timed Discharge Control"},
+    "generatorStartChg": {"kind": "bool", "name": "Generator Charging Control"},
+    "generatorMaxChgCurrent": {"kind": "int", "min": 0, "max": 60, "step": 1,
+                               "name": "Generator Max Charging Current Control", "unit": "A"},
+    # workMode is intentionally NOT writable yet: changing the hybrid grid mode can
+    # reconfigure grid interaction for the whole house and has not been live-tested.
+    "batDischgManagement": {"kind": "enum", "name": "Battery Energy Manage Control"},
+    "pvChargingPriority": {"kind": "enum", "name": "PV Energy Manage Control"},
+}
+for _slot in (1, 2, 3):
+    for _dir, _label, _soc, _v, _pwr in (
+        ("Chg", "Charge", "StopChargingSoc", "StopChargingV", "MaxChgPwr"),
+        ("Dischg", "Discharge", "StopDischargingSoc", "StopDischargingV", "MaxDisChgPwr"),
+    ):
+        _n = f"{_label} Slot {_slot}"
+        WRITABLE_SETTINGS.update({
+            f"start{_dir}Time{_slot}": {"kind": "hhmm", "name": f"{_n} Start Control", "slot": _slot},
+            f"end{_dir}Time{_slot}": {"kind": "hhmm", "name": f"{_n} End Control", "slot": _slot},
+            f"timePeriod{_slot}{_soc}": {"kind": "int", "min": 0, "max": 100, "step": 1,
+                                         "name": f"{_n} Stop SOC Control", "unit": "%", "slot": _slot},
+            f"timePeriod{_slot}{_v}": {"kind": "float", "min": 40.0, "max": 59.5, "step": 0.1,
+                                       "name": f"{_n} Stop Voltage Control", "unit": "V", "slot": _slot},
+            f"timePeriod{_slot}{_pwr}": {"kind": "int", "min": 0, "max": 12000, "step": 100,
+                                         "name": f"{_n} Max Power Control", "unit": "W", "slot": _slot},
+        })
+    WRITABLE_SETTINGS[f"timePeriod{_slot}StopChargingEnergySource"] = {
+        "kind": "enum", "name": f"Charge Slot {_slot} Energy Source Control", "slot": _slot,
+    }
+
+
+def allowed_options(key: str) -> dict[int, str]:
+    """Selectable options for an enum key, with export-related values removed."""
+    refused = GRID_EXPORT_REFUSED.get(key, set())
+    return {v: n for v, n in ENUM_OPTIONS.get(key, {}).items() if v not in refused}
 
 
 class SettingWriteError(ValueError):
     """Raised when a model-29 setting write is refused before any request."""
 
 
+def _to_number(key: str, value) -> float:
+    if isinstance(value, bool):
+        return float(value)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        raise SettingWriteError(f"{key}: {value!r} is not a number") from None
+
+
 def validate_setting_write(key: str, value):
-    """Return the value to send (int or "HHMM" str), or raise SettingWriteError."""
+    """Return the value to send (int, float or "HHMM" str), or raise SettingWriteError."""
     spec = WRITABLE_SETTINGS.get(key)
     if spec is None:
         raise SettingWriteError(f"Writing {key} is not enabled for HESS-HY-S-12K-S")
@@ -205,16 +268,27 @@ def validate_setting_write(key: str, value):
         if int(text[:2]) > 23 or int(text[2:]) > 59:
             raise SettingWriteError(f"{key}: {value!r} is not a valid time")
         return text
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        raise SettingWriteError(f"{key}: {value!r} is not a number") from None
+    number = _to_number(key, value)
+    if kind == "float":
+        if not spec["min"] <= number <= spec["max"]:
+            raise SettingWriteError(
+                f"{key}: {number} outside allowed range {spec['min']}-{spec['max']}"
+            )
+        return round(number, 1)
     if number != int(number):
         raise SettingWriteError(f"{key}: {value!r} must be a whole number")
     number = int(number)
     if kind == "bool":
         if number not in (0, 1):
             raise SettingWriteError(f"{key}: must be 0 or 1")
+        return number
+    if kind == "enum":
+        if number in GRID_EXPORT_REFUSED.get(key, set()):
+            raise SettingWriteError(
+                f"{key}={number} is refused: it allows grid export, which is disabled"
+            )
+        if number not in ENUM_OPTIONS.get(key, {}):
+            raise SettingWriteError(f"{key}: {number} is not a valid option")
         return number
     if not spec["min"] <= number <= spec["max"]:
         raise SettingWriteError(

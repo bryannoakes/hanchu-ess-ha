@@ -10,6 +10,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .models import inverter_model_name
 from .const import DOMAIN
 from .settings_12k import is_12k_s
+from .settings_12k_entities import build_entities
 from . import HanchuessConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
@@ -29,6 +30,9 @@ async def async_setup_entry(
 ):
     if is_12k_s(entry):
         _LOGGER.info("[HANCHUESS] Skipping generic Work Mode control for HESS-HY-S-12K-S")
+        settings = entry.runtime_data.settings
+        if settings is not None:
+            async_add_entities(build_entities(entry, settings, ("enum",)))
         return
 
     data = entry.runtime_data

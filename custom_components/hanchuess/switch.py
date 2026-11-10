@@ -9,6 +9,7 @@ from homeassistant.helpers.entity import DeviceInfo
 from .models import inverter_model_name
 from .const import DOMAIN, CONF_FAST_CHARGE_DURATION, DEFAULT_FAST_CHARGE_DURATION
 from .settings_12k import is_12k_s
+from .settings_12k_entities import build_entities
 from . import HanchuessConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
@@ -34,7 +35,7 @@ async def async_setup_entry(
         )
         settings = entry.runtime_data.settings
         if settings is not None:
-            async_add_entities([HanchuessTimedDischargeSwitch(entry, settings)])
+            async_add_entities(build_entities(entry, settings, ('bool',)))
         return
 
     data = entry.runtime_data
@@ -141,41 +142,3 @@ class FastDischargeSwitch(SwitchEntity):
             _LOGGER.info("[HANCHUESS] Fast discharge stopped for %s", inverter_serial_number)
         else:
             _LOGGER.error("[HANCHUESS] Fast discharge stop failed: %s", result.get("msg"))
-
-
-class HanchuessTimedDischargeSwitch(CoordinatorEntity, SwitchEntity):
-    """Model-29 Timed Discharge Enable (timedDischargeEnable)."""
-
-    _attr_has_entity_name = True
-    _attr_name = "Timed Discharge Control"
-    _attr_icon = "mdi:battery-clock-outline"
-    _attr_entity_category = EntityCategory.CONFIG
-
-    def __init__(self, entry, coordinator):
-        super().__init__(coordinator)
-        self._entry = entry
-        sn = entry.data["sn"]
-        self._attr_unique_id = f"{sn}_setting_write_timedDischargeEnable"
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        sn = self._entry.data["sn"]
-        return DeviceInfo(
-            identifiers={(DOMAIN, sn)},
-            name=f"Hanchuess {sn}",
-            manufacturer="Hanchu",
-            model=inverter_model_name(self._entry),
-        )
-
-    @property
-    def is_on(self):
-        raw = (self.coordinator.data or {}).get("timedDischargeEnable")
-        if raw is None:
-            return None
-        return str(raw).strip() == "1"
-
-    async def async_turn_on(self, **kwargs) -> None:
-        await self.coordinator.async_write_setting("timedDischargeEnable", 1)
-
-    async def async_turn_off(self, **kwargs) -> None:
-        await self.coordinator.async_write_setting("timedDischargeEnable", 0)

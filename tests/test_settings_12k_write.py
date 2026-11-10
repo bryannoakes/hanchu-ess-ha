@@ -37,8 +37,8 @@ OK = {
 
 
 @pytest.mark.parametrize("key", [
-    "workMode", "gridCharging", "batDischgManagement", "pvChargingPriority",
-    "timedChargeEnable", "startChgTime1", "startDischgTime2", "endChgTime1", "timePeriod1MaxChgPwr", "R173", "",
+    "R173", "workMode", "", "enPower", "pcsRestart", "passwordRead", "time", "enNpe", "activePwrSet",
+    "stPLdSped", "reconPLdSped", "BAT_CLE_PWD", "DTU_RESTART", "devType",
 ])
 def test_everything_but_allowlisted_key_is_refused(key):
     with pytest.raises(SettingWriteError):
@@ -147,3 +147,76 @@ async def test_time_write_confirmed_with_string_readback():
     assert await coord.async_write_setting("startDischgTime1", "03:00", delay=0) == "0300"
     assert coord.data["startDischgTime1"] == "0300"
     client.async_platform_iot_set.assert_awaited_once_with("SN1", "2", {"startDischgTime1": "0300"})
+
+
+@pytest.mark.parametrize("key,value", [
+    ("batDischgManagement", 3), ("pvChargingPriority", 2),
+    ("batDischgManagement", 4), ("pvChargingPriority", 9), ("batDischgManagement", -1),
+])
+def test_export_and_invalid_enum_values_refused(key, value):
+    with pytest.raises(SettingWriteError):
+        validate_setting_write(key, value)
+
+
+@pytest.mark.parametrize("key,value,expected", [
+    ("batDischgManagement", 0, 0),
+    ("batDischgManagement", 2, 2), ("pvChargingPriority", 0, 0), ("pvChargingPriority", 1, 1),
+    ("timePeriod1StopChargingEnergySource", 3, 3), ("gridCharging", 1, 1),
+    ("timedChargeEnable", 0, 0),
+])
+def test_safe_enum_and_bool_values_accepted(key, value, expected):
+    assert validate_setting_write(key, value) == expected
+
+
+def test_allowed_options_never_include_export():
+    from custom_components.hanchuess.settings_12k import allowed_options
+    assert allowed_options("workMode") == {2: "Limit power to UPS load", 3: "Limit power to home load"}
+    assert 3 not in allowed_options("batDischgManagement")
+    assert 2 not in allowed_options("pvChargingPriority")
+
+
+@pytest.mark.parametrize("key,value,expected", [
+    ("timePeriod2StopDischargingV", 45, 45.0), ("timePeriod1StopChargingV", "57.6", 57.6),
+    ("timePeriod3MaxChgPwr", 6600, 6600), ("timePeriod2MaxDisChgPwr", 0, 0),
+    ("timePeriod1StopChargingSoc", 52, 52), ("generatorMaxChgCurrent", 40, 40),
+])
+def test_slot_numeric_ranges_accept(key, value, expected):
+    assert validate_setting_write(key, value) == expected
+
+
+@pytest.mark.parametrize("key,value", [
+    ("timePeriod1StopChargingV", 39.9), ("timePeriod1StopChargingV", 60),
+    ("timePeriod1MaxChgPwr", 12001), ("timePeriod1MaxChgPwr", -1),
+    ("timePeriod1StopDischargingSoc", 101), ("generatorMaxChgCurrent", 61),
+    ("startChgTime3", "2460"), ("endDischgTime2", "9"),
+])
+def test_slot_numeric_ranges_reject(key, value):
+    with pytest.raises(SettingWriteError):
+        validate_setting_write(key, value)
+
+
+def test_every_writable_key_exists_in_platform_keys():
+    from custom_components.hanchuess.settings_12k import PLATFORM_SETTING_KEYS, WRITABLE_SETTINGS
+    extra = {"generatorStartChg", "generatorMaxChgCurrent"}
+    assert set(WRITABLE_SETTINGS) - extra <= set(PLATFORM_SETTING_KEYS)
+
+
+async def test_float_write_confirmed_by_read_back():
+    coord, _ = _coordinator({"success": True}, [{"timePeriod1StopChargingV": "57.6"}])
+    assert await coord.async_write_setting("timePeriod1StopChargingV", 57.6, delay=0) == 57.6
+
+
+def test_entities_built_from_allow_list_and_select_hides_export():
+    from custom_components.hanchuess.settings_12k import WRITABLE_SETTINGS
+    from custom_components.hanchuess.settings_12k_entities import build_entities
+
+    entry = MagicMock()
+    entry.data = {"sn": "SN1"}
+    ents = build_entities(entry, MagicMock(), ("int", "float", "bool", "enum", "hhmm"))
+    assert {e._key for e in ents} == set(WRITABLE_SETTINGS)
+    assert len({e.unique_id for e in ents}) == len(ents)
+    selects = {e._key: e for e in ents if e._key in ("batDischgManagement", "pvChargingPriority")}
+    assert "Battery to grid sell" not in selects["batDischgManagement"].options
+    assert "First to grid" not in selects["pvChargingPriority"].options
+    slot2 = [e for e in ents if e._spec.get("slot") == 2]
+    assert slot2 and all(e.entity_registry_enabled_default is False for e in slot2)
