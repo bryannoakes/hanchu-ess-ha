@@ -442,6 +442,10 @@ async def ws_iot_get(hass, connection, msg):
         result = await coordinator.client.async_platform_iot_get(
             inverter_serial_number, dev_type, keys
         )
+        settings_coordinator = entry.runtime_data.settings
+        if settings_coordinator is not None and result:
+            merged = {**(settings_coordinator.data or {}), **result}
+            settings_coordinator.async_set_updated_data(merged)
     else:
         result = await coordinator.client.async_iot_get(
             inverter_serial_number, dev_type, keys
