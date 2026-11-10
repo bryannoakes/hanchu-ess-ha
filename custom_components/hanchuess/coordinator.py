@@ -144,6 +144,18 @@ class HanchuessStatisticsCoordinator(DataUpdateCoordinator):
             )
 
 
+def _same(raw, sent) -> bool:
+    """Compare a read-back value with what was sent (strings like '0300', '97')."""
+    if raw is None:
+        return False
+    if isinstance(sent, str):
+        return str(raw).strip() == sent
+    try:
+        return int(float(raw)) == sent
+    except (TypeError, ValueError):
+        return False
+
+
 class HanchuessSettingsCoordinator(TimestampDataUpdateCoordinator):
     """On-demand model-29 settings coordinator.
 
@@ -184,7 +196,7 @@ class HanchuessSettingsCoordinator(TimestampDataUpdateCoordinator):
 
     async def async_write_setting(
         self, key: str, value, *, attempts: int = 6, delay: float = 3.0
-    ) -> int:
+    ):
         """Write one allow-listed setting and confirm it by reading it back.
 
         Raises HomeAssistantError if the write is refused, rejected, or the
@@ -208,11 +220,7 @@ class HanchuessSettingsCoordinator(TimestampDataUpdateCoordinator):
             if attempt:
                 await asyncio.sleep(delay)
             read = await self.client.async_platform_iot_get(sn, "2", [key])
-            try:
-                confirmed = int(float(read.get(key)))
-            except (TypeError, ValueError):
-                continue
-            if confirmed == number:
+            if _same(read.get(key), number):
                 self.async_set_updated_data({**(self.data or {}), key: str(number)})
                 return number
         raise HomeAssistantError(

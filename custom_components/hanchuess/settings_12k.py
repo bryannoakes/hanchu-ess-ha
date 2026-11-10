@@ -177,7 +177,14 @@ def decode_setting_value(key: str, raw, dynamic_options: dict | None = None):
 # ---------------------------------------------------------------------------
 WRITABLE_SETTINGS: dict[str, dict] = {
     # Captured from the iESS UI: {"value": {"chgSocLmt": 97}}; UI range [50, 100].
-    "chgSocLmt": {"min": 50, "max": 100, "step": 1},
+    "chgSocLmt": {"kind": "int", "min": 50, "max": 100, "step": 1},
+    # Live-validated: {"timedDischargeEnable": 0|1} (ints).  Timed *charge* is
+    # deliberately NOT enabled: it can pull from the grid.
+    "timedDischargeEnable": {"kind": "bool"},
+    # Live-validated: times must be "HHMM" STRINGS ("0300"); integers (300), which
+    # the iESS UI sends, are rejected by the device with result code 2.
+    "startDischgTime1": {"kind": "hhmm"},
+    "endDischgTime1": {"kind": "hhmm"},
 }
 
 
@@ -185,11 +192,19 @@ class SettingWriteError(ValueError):
     """Raised when a model-29 setting write is refused before any request."""
 
 
-def validate_setting_write(key: str, value) -> int:
-    """Return the integer to send, or raise SettingWriteError."""
+def validate_setting_write(key: str, value):
+    """Return the value to send (int or "HHMM" str), or raise SettingWriteError."""
     spec = WRITABLE_SETTINGS.get(key)
     if spec is None:
         raise SettingWriteError(f"Writing {key} is not enabled for HESS-HY-S-12K-S")
+    kind = spec["kind"]
+    if kind == "hhmm":
+        text = str(value).strip().replace(":", "")
+        if len(text) != 4 or not text.isdigit():
+            raise SettingWriteError(f"{key}: {value!r} is not a time (HHMM)")
+        if int(text[:2]) > 23 or int(text[2:]) > 59:
+            raise SettingWriteError(f"{key}: {value!r} is not a valid time")
+        return text
     try:
         number = float(value)
     except (TypeError, ValueError):
@@ -197,6 +212,10 @@ def validate_setting_write(key: str, value) -> int:
     if number != int(number):
         raise SettingWriteError(f"{key}: {value!r} must be a whole number")
     number = int(number)
+    if kind == "bool":
+        if number not in (0, 1):
+            raise SettingWriteError(f"{key}: must be 0 or 1")
+        return number
     if not spec["min"] <= number <= spec["max"]:
         raise SettingWriteError(
             f"{key}: {number} outside allowed range {spec['min']}-{spec['max']}"

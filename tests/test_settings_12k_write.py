@@ -38,7 +38,7 @@ OK = {
 
 @pytest.mark.parametrize("key", [
     "workMode", "gridCharging", "batDischgManagement", "pvChargingPriority",
-    "timedChargeEnable", "startChgTime1", "timePeriod1MaxChgPwr", "R173", "",
+    "timedChargeEnable", "startChgTime1", "startDischgTime2", "endChgTime1", "timePeriod1MaxChgPwr", "R173", "",
 ])
 def test_everything_but_allowlisted_key_is_refused(key):
     with pytest.raises(SettingWriteError):
@@ -117,3 +117,33 @@ async def test_disallowed_key_never_reaches_network():
     with pytest.raises(HomeAssistantError):
         await coord.async_write_setting("batDischgManagement", 3, delay=0)
     client.async_platform_iot_set.assert_not_awaited()
+
+
+@pytest.mark.parametrize("value,expected", [("03:00", "0300"), ("0400", "0400"), ("2359", "2359")])
+def test_hhmm_is_sent_as_string(value, expected):
+    sent = validate_setting_write("startDischgTime1", value)
+    assert sent == expected and isinstance(sent, str)
+
+
+@pytest.mark.parametrize("value", ["2400", "0360", "300", "ab:cd", None, ""])
+def test_hhmm_rejects_bad_times(value):
+    with pytest.raises(SettingWriteError):
+        validate_setting_write("endDischgTime1", value)
+
+
+@pytest.mark.parametrize("value,expected", [(0, 0), (1, 1), ("1", 1)])
+def test_timed_discharge_enable_bool(value, expected):
+    assert validate_setting_write("timedDischargeEnable", value) == expected
+
+
+@pytest.mark.parametrize("value", [2, -1, "x", 0.5])
+def test_timed_discharge_enable_rejects_non_bool(value):
+    with pytest.raises(SettingWriteError):
+        validate_setting_write("timedDischargeEnable", value)
+
+
+async def test_time_write_confirmed_with_string_readback():
+    coord, client = _coordinator({"success": True}, [{"startDischgTime1": "0300"}])
+    assert await coord.async_write_setting("startDischgTime1", "03:00", delay=0) == "0300"
+    assert coord.data["startDischgTime1"] == "0300"
+    client.async_platform_iot_set.assert_awaited_once_with("SN1", "2", {"startDischgTime1": "0300"})

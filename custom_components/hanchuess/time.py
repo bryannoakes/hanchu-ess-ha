@@ -3,6 +3,7 @@ import asyncio
 import logging
 from datetime import time
 from homeassistant.components.time import TimeEntity
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -85,6 +86,12 @@ async def async_setup_entry(
 ):
     if is_12k_s(entry):
         _LOGGER.info("[HANCHUESS] Skipping generic time-slot controls for HESS-HY-S-12K-S")
+        settings = entry.runtime_data.settings
+        if settings is not None:
+            async_add_entities([
+                HanchuessDischargeSlotTime(entry, settings, "startDischgTime1", "Discharge Slot 1 Start Control"),
+                HanchuessDischargeSlotTime(entry, settings, "endDischgTime1", "Discharge Slot 1 End Control"),
+            ])
         return
 
     data = entry.runtime_data
@@ -178,3 +185,43 @@ class HanchuessTimeSlot(TimeEntity):
             self._pending_value = None
         except asyncio.CancelledError:
             pass
+
+
+class HanchuessDischargeSlotTime(CoordinatorEntity, TimeEntity):
+    """Model-29 discharge period time, written as an "HHMM" string."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:battery-clock-outline"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, entry, coordinator, setting_key: str, name: str):
+        super().__init__(coordinator)
+        self._entry = entry
+        self._setting_key = setting_key
+        self._attr_name = name
+        self._attr_unique_id = f"{entry.data['sn']}_setting_write_{setting_key}"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        sn = self._entry.data["sn"]
+        return DeviceInfo(
+            identifiers={(DOMAIN, sn)},
+            name=f"Hanchuess {sn}",
+            manufacturer="Hanchu",
+            model=inverter_model_name(self._entry),
+        )
+
+    @property
+    def native_value(self):
+        raw = str((self.coordinator.data or {}).get(self._setting_key) or "").strip()
+        if len(raw) != 4 or not raw.isdigit():
+            return None
+        try:
+            return time(int(raw[:2]), int(raw[2:]))
+        except ValueError:
+            return None
+
+    async def async_set_value(self, value: time) -> None:
+        await self.coordinator.async_write_setting(
+            self._setting_key, f"{value.hour:02d}{value.minute:02d}"
+        )
