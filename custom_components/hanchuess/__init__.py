@@ -352,6 +352,17 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             )
             return
 
+        entry = _find_entry(hass, inverter_serial_number)
+        if (
+            entry is not None
+            and entry.runtime_data.inverter_model is not None
+            and entry.runtime_data.inverter_model.code == MODEL_12K_CODE
+        ):
+            _LOGGER.error(
+                "[HANCHUESS] fast_charge blocked for HESS-HY-S-12K-S during read-only validation"
+            )
+            return
+
         result = await coordinator.client.async_fast_charge_discharge(
             inverter_serial_number, act, duration
         )
@@ -518,6 +529,19 @@ async def ws_fast_charge(hass, connection, msg):
             msg["id"], "not_found", f"Device {inverter_serial_number} not found"
         )
         return
+    entry = _find_entry(hass, inverter_serial_number)
+    if (
+        entry is not None
+        and entry.runtime_data.inverter_model is not None
+        and entry.runtime_data.inverter_model.code == MODEL_12K_CODE
+    ):
+        connection.send_error(
+            msg["id"],
+            "unsupported_model_write",
+            "Fast charge/discharge is disabled for HESS-HY-S-12K-S during read-only validation",
+        )
+        return
+
     result = await coordinator.client.async_fast_charge_discharge(
         inverter_serial_number, msg["act"], msg["duration"]
     )
