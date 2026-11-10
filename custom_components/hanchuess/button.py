@@ -102,15 +102,24 @@ class HanchuessReadSettingsButton(ButtonEntity):
         _LOGGER.info("[HANCHUESS] Read Settings pressed for %s", inverter_serial_number)
         try:
             if is_12k_s(self._entry):
-                values = await client.async_platform_iot_get(
-                    inverter_serial_number,
-                    "2",
-                    PLATFORM_SETTING_KEYS,
+                coordinator = self._entry.runtime_data.settings
+                if coordinator is None:
+                    _LOGGER.error(
+                        "[HANCHUESS] Read Settings has no model-29 settings coordinator"
+                    )
+                    return
+                await coordinator.async_request_refresh()
+                if not coordinator.last_update_success:
+                    _LOGGER.warning("[HANCHUESS] Read Settings refresh failed")
+                    return
+                _LOGGER.info(
+                    "[HANCHUESS] Read Settings refreshed %d model-29 values",
+                    len(coordinator.data or {}),
                 )
-            else:
-                values = await client.async_iot_get(
-                    inverter_serial_number, "2", ALL_CONTROL_KEYS
-                )
+                return
+            values = await client.async_iot_get(
+                inverter_serial_number, "2", ALL_CONTROL_KEYS
+            )
         except Exception as err:  # noqa: BLE001
             _LOGGER.error("[HANCHUESS] Read Settings failed: %s", err)
             return
