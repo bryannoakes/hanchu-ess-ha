@@ -6,6 +6,7 @@ module skips if it is unavailable.
 from datetime import time as dt_time
 import math
 from unittest.mock import AsyncMock, MagicMock
+from types import SimpleNamespace
 
 import pytest
 
@@ -28,6 +29,7 @@ from custom_components.hanchuess.sensor import (
     BatterySensor,
     BATTERY_SENSORS,
     _battery_temperature_count,
+    HanchuessReadOnlySettingSensor,
 )
 
 
@@ -771,3 +773,44 @@ def test_12k_setting_decodes_numeric_units():
 
 def test_12k_setting_preserves_unknown_enum_value():
     assert decode_setting_value("workMode", "2") == "2"
+
+
+# ---------------------------------------------------------------------------
+# Model-29 settings refresh coordinator wiring
+# ---------------------------------------------------------------------------
+
+from custom_components.hanchuess.button import HanchuessReadSettingsButton
+from custom_components.hanchuess.settings_12k import SETTING_SENSORS
+
+
+async def test_12k_read_settings_button_refreshes_settings_coordinator():
+    entry = _FakeEntryWithStaging()
+    entry.runtime_data.inverter_model = SimpleNamespace(code=29)
+    entry.runtime_data.realtime = SimpleNamespace(client=AsyncMock())
+    settings = MagicMock()
+    settings.async_request_refresh = AsyncMock()
+    settings.last_update_success = True
+    settings.data = {"chgSocLmt": "95"}
+    entry.runtime_data.settings = settings
+
+    button = HanchuessReadSettingsButton(MagicMock(), entry)
+    await button.async_press()
+
+    settings.async_request_refresh.assert_awaited_once()
+
+
+def test_12k_setting_sensor_reads_current_coordinator_data():
+    coordinator = MagicMock()
+    coordinator.data = {"chgSocLmt": "98"}
+    entry = _FakeEntryWithStaging()
+    sensor = HanchuessReadOnlySettingSensor(
+        coordinator,
+        entry,
+        "chgSocLmt",
+        SETTING_SENSORS["chgSocLmt"],
+    )
+
+    assert sensor.native_value == 98
+
+    coordinator.data = {"chgSocLmt": "95"}
+    assert sensor.native_value == 95
