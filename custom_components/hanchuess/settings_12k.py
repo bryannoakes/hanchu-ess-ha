@@ -62,18 +62,6 @@ VALUE_MAPS: dict[str, dict[str, str]] = {
     },
     "timedChargeEnable": {"0": "Off", "1": "On"},
     "timedDischargeEnable": {"0": "Off", "1": "On"},
-    "timePeriod1StopChargingEnergySource": {
-        "0": "None",
-        "1": "Grid charging",
-    },
-    "timePeriod2StopChargingEnergySource": {
-        "0": "None",
-        "1": "Grid charging",
-    },
-    "timePeriod3StopChargingEnergySource": {
-        "0": "None",
-        "1": "Grid charging",
-    },
 }
 
 SETTING_SENSORS: dict[str, dict] = {
