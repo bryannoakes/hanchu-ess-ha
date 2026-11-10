@@ -24,6 +24,7 @@ from .coordinator import (
     HanchuessRealtimeCoordinator,
     HanchuessStatisticsCoordinator,
     HanchuessBatteryCoordinator,
+    HanchuessSettingsCoordinator,
 )
 from .staging import SettingsStagingBuffer
 
@@ -48,6 +49,7 @@ class HanchuessData:
     realtime: HanchuessRealtimeCoordinator
     statistics: HanchuessStatisticsCoordinator
     battery: HanchuessBatteryCoordinator | None
+    settings: HanchuessSettingsCoordinator | None
     number_limits: dict
     startup_values: dict
     staging: SettingsStagingBuffer
@@ -708,19 +710,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: HanchuessConfigEntry) ->
                 menu_max,
             )
 
-    # Fetch all current values in one iotGet call — relies on the API
-    # client's own internal retry/timeout handling (see api.py)
+    # Model 29 uses an on-demand coordinator so startup and Read Settings
+    # share the same HA-native refresh path. Other models retain the generic
+    # one-shot iotGet startup read.
+    settings_coordinator = None
     startup_values = {}
     try:
         if inverter_model is not None and inverter_model.code == MODEL_12K_CODE:
-            startup_values = await client.async_platform_iot_get(
-                inverter_serial_number,
-                "2",
-                PLATFORM_SETTING_KEYS,
-                language=language,
-            )
+            settings_coordinator = HanchuessSettingsCoordinator(hass, entry, client)
+            await _async_initial_refresh(settings_coordinator, entry)
+            startup_values = settings_coordinator.data or {}
             _LOGGER.info(
-                "[HANCHUESS] Model-29 platform startup values fetched: %d keys",
+                "[HANCHUESS] Model-29 settings coordinator loaded %d keys",
                 len(startup_values),
             )
         else:
@@ -759,6 +760,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: HanchuessConfigEntry) ->
         realtime=coordinator,
         statistics=stats_coordinator,
         battery=battery_coordinator,
+        settings=settings_coordinator,
         number_limits=number_limits,
         startup_values=startup_values,
         staging=SettingsStagingBuffer(),
@@ -769,7 +771,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: HanchuessConfigEntry) ->
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    if startup_values:
+    if startup_values and settings_coordinator is None:
         from .button import apply_iot_values
         apply_iot_values(entry, startup_values)
         _LOGGER.info(
