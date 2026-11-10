@@ -11,14 +11,25 @@ Status: **writes remain blocked**. Nothing here has been executed against a live
 - `appPlat: ha` and `appPlat: iess` logins both read identical, current values.
 - The generic `/app/ha/iotSet` path is not validated for model 29 and stays blocked.
 
-## Open questions (need one captured native write)
-1. Exact `value` key naming and value encoding (strings vs ints, HHMM time format, enum ints).
+## Captured native write (live, 2026-11-10)
+Via the iESS UI (Energy Setup -> Set), `chgSocLmt` 98 -> 97 -> 98, both restored/verified:
+- Request: `POST /gateway/platform/deviceNew/iotSet`, encrypted body decoding to
+  `{"devType":"2","sn":"<SN>","value":{"chgSocLmt":97}}` — **same key names as iotGet, integer value**,
+  and only the changed key was sent (single-key write, even though the UI section has many fields).
+- Response: `{"code":200,"msg":"Success!","data":{"taskId":"RCT...","failCount":0,"successCount":1,
+  "responseSemMap":{"chgSocLmt":"1"}},"success":true}` — asynchronous task; confirm by read-back.
+- iotGet confirmed 98 under both `ha` and `iess` tokens after restore.
+- The native read also returns `generatorStartChg` and `generatorMaxChgCurrent` (not in our schema).
+- The UI has a settings history ("Record") panel listing every change with operator.
+
+## Still open (was: open questions)
+1. ~~Key naming~~ answered for ints (above); still unknown: HHMM time format and enum encodings.
 2. Whether the ha-flavoured token may call `deviceNew/iotSet` or it is iess-only.
 3. What `skipCheckLock` and the control-permission/lock check do.
 4. Response shape and how success is confirmed (read-back via `iotGet`).
 
 ## Proposed approach
-1. Capture ONE native write of a reversible, non-export setting (`chgSocLmt` 98->97->98) using the
+1. (done) Capture ONE native write of a reversible, non-export setting (`chgSocLmt` 98->97->98) using the
    user's own iESS UI with browser network capture; save under `.secrets/captures/`.
 2. Add a `tools/probe.py write` subcommand that is dry-run by default and refuses export-related
    keys (batDischgManagement=3, pvChargingPriority=2, anything grid-sell).
