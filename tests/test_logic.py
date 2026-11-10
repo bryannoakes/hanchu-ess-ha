@@ -30,6 +30,7 @@ from custom_components.hanchuess.sensor import (
     BATTERY_SENSORS,
     _battery_temperature_count,
     HanchuessReadOnlySettingSensor,
+    HanchuessSettingsLastRefreshSensor,
 )
 
 
@@ -788,7 +789,7 @@ async def test_12k_read_settings_button_refreshes_settings_coordinator():
     entry.runtime_data.inverter_model = SimpleNamespace(code=29)
     entry.runtime_data.realtime = SimpleNamespace(client=AsyncMock())
     settings = MagicMock()
-    settings.async_request_refresh = AsyncMock()
+    settings.async_refresh = AsyncMock()
     settings.last_update_success = True
     settings.data = {"chgSocLmt": "95"}
     entry.runtime_data.settings = settings
@@ -796,7 +797,7 @@ async def test_12k_read_settings_button_refreshes_settings_coordinator():
     button = HanchuessReadSettingsButton(MagicMock(), entry)
     await button.async_press()
 
-    settings.async_request_refresh.assert_awaited_once()
+    settings.async_refresh.assert_awaited_once()
 
 
 def test_12k_setting_sensor_reads_current_coordinator_data():
@@ -814,3 +815,20 @@ def test_12k_setting_sensor_reads_current_coordinator_data():
 
     coordinator.data = {"chgSocLmt": "95"}
     assert sensor.native_value == 95
+
+
+def test_12k_settings_last_refresh_sensor_exposes_coordinator_timestamp():
+    from datetime import datetime, timezone
+
+    coordinator = MagicMock()
+    coordinator.last_update_success_time = datetime(2026, 11, 10, 14, 0, tzinfo=timezone.utc)
+    coordinator.last_update_success = True
+    coordinator.last_exception = None
+    coordinator.data = {"workMode": "3", "chgSocLmt": "98"}
+    entry = _FakeEntryWithStaging()
+
+    sensor = HanchuessSettingsLastRefreshSensor(coordinator, entry)
+
+    assert sensor.native_value == coordinator.last_update_success_time
+    assert sensor.extra_state_attributes["key_count"] == 2
+    assert sensor.extra_state_attributes["last_update_success"] is True
