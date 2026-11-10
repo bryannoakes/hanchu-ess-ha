@@ -291,6 +291,38 @@ class HanchuessApiClient:
         )
         return {}
 
+    async def async_platform_iot_set(
+        self, sn: str, dev_type: str, value: dict, language: str = "en"
+    ) -> dict:
+        """Write settings via the native encrypted /platform/deviceNew/iotSet.
+
+        Captured from the iESS web app: body {"devType","sn","value":{key:int}}.
+        Success only means the task was queued; callers must read back.
+        """
+        payload = _encrypt_payload({"sn": sn, "devType": dev_type, "value": value})
+        result = await self._request(
+            "/gateway/platform/deviceNew/iotSet",
+            payload,
+            language=language,
+            send_as_json=False,
+            extra_headers={"Content-Type": "text/plain", "version": "1.0"},
+        )
+        if result and result.get("code") == 401:
+            return {"success": False, "msg": "token_expired"}
+        data = (result or {}).get("data")
+        if (
+            result
+            and result.get("success")
+            and isinstance(data, dict)
+            and data.get("failCount", 0) == 0
+            and data.get("successCount", 0) >= 1
+        ):
+            return {"success": True, "data": data}
+        return {
+            "success": False,
+            "msg": (result or {}).get("msg") or "Request failed",
+        }
+
     async def async_fast_charge_discharge(self, sn: str, act: int, duration: int) -> dict:
         result = await self._request(
             "/gateway/app/ha/fastChargeDischarge",

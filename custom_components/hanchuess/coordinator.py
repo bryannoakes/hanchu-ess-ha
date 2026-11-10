@@ -182,6 +182,44 @@ class HanchuessSettingsCoordinator(TimestampDataUpdateCoordinator):
         return data
 
 
+    async def async_write_setting(
+        self, key: str, value, *, attempts: int = 6, delay: float = 3.0
+    ) -> int:
+        """Write one allow-listed setting and confirm it by reading it back.
+
+        Raises HomeAssistantError if the write is refused, rejected, or the
+        cloud never reports the new value.  Never trusts the write response.
+        """
+        from homeassistant.exceptions import HomeAssistantError
+
+        from .settings_12k import SettingWriteError, validate_setting_write
+
+        try:
+            number = validate_setting_write(key, value)
+        except SettingWriteError as err:
+            raise HomeAssistantError(str(err)) from err
+        sn = self.entry.data["sn"]
+        result = await self.client.async_platform_iot_set(sn, "2", {key: number})
+        if not result.get("success"):
+            raise HomeAssistantError(
+                f"Hanchu rejected {key} write: {result.get('msg', 'unknown error')}"
+            )
+        for attempt in range(attempts):
+            if attempt:
+                await asyncio.sleep(delay)
+            read = await self.client.async_platform_iot_get(sn, "2", [key])
+            try:
+                confirmed = int(float(read.get(key)))
+            except (TypeError, ValueError):
+                continue
+            if confirmed == number:
+                self.async_set_updated_data({**(self.data or {}), key: str(number)})
+                return number
+        raise HomeAssistantError(
+            f"{key} write was accepted but read-back did not confirm {number}"
+        )
+
+
 class HanchuessBatteryCoordinator(DataUpdateCoordinator):
     """Battery data coordinator."""
 

@@ -168,3 +168,37 @@ def decode_setting_value(key: str, raw, dynamic_options: dict | None = None):
         return int(value) if value.is_integer() else value
 
     return raw_text
+
+
+# ---------------------------------------------------------------------------
+# Writes.  Strict allow-list: only keys whose native write semantics were
+# captured AND live-validated may be written.  Everything else (including all
+# grid-sell/export related options) is refused.  See docs/model29-write-plan.md.
+# ---------------------------------------------------------------------------
+WRITABLE_SETTINGS: dict[str, dict] = {
+    # Captured from the iESS UI: {"value": {"chgSocLmt": 97}}; UI range [50, 100].
+    "chgSocLmt": {"min": 50, "max": 100, "step": 1},
+}
+
+
+class SettingWriteError(ValueError):
+    """Raised when a model-29 setting write is refused before any request."""
+
+
+def validate_setting_write(key: str, value) -> int:
+    """Return the integer to send, or raise SettingWriteError."""
+    spec = WRITABLE_SETTINGS.get(key)
+    if spec is None:
+        raise SettingWriteError(f"Writing {key} is not enabled for HESS-HY-S-12K-S")
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        raise SettingWriteError(f"{key}: {value!r} is not a number") from None
+    if number != int(number):
+        raise SettingWriteError(f"{key}: {value!r} must be a whole number")
+    number = int(number)
+    if not spec["min"] <= number <= spec["max"]:
+        raise SettingWriteError(
+            f"{key}: {number} outside allowed range {spec['min']}-{spec['max']}"
+        )
+    return number
