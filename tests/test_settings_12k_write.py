@@ -220,3 +220,13 @@ def test_entities_built_from_allow_list_and_select_hides_export():
     assert "First to grid" not in selects["pvChargingPriority"].options
     slot2 = [e for e in ents if e._spec.get("slot") == 2]
     assert slot2 and all(e.entity_registry_enabled_default is False for e in slot2)
+
+
+@pytest.mark.parametrize("platform", ["number", "switch", "select", "time", "sensor", "button"])
+def test_platform_modules_import(platform):
+    """Catches NameError-style wiring mistakes in platform setup code."""
+    import importlib
+    mod = importlib.import_module(f"custom_components.hanchuess.{platform}")
+    assert hasattr(mod, "async_setup_entry")
+    if platform in ("number", "switch", "select", "time"):
+        assert hasattr(mod, "build_entities")

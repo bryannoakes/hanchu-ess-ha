@@ -8,7 +8,8 @@ from homeassistant.helpers.entity import DeviceInfo
 from .models import inverter_model_name
 from .const import DOMAIN
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from .settings_12k import WRITABLE_SETTINGS, is_12k_s
+from .settings_12k import is_12k_s
+from .settings_12k_entities import build_entities
 from . import HanchuessConfigEntry
 
 _LOGGER = logging.getLogger(__name__)

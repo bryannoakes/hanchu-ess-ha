@@ -39,6 +39,8 @@ PLATFORM_SETTING_KEYS: list[str] = [
     "startDischgTime3", "endDischgTime3",
     "timePeriod3StopDischargingSoc", "timePeriod3StopDischargingV",
     "timePeriod3MaxDisChgPwr",
+    # Returned by the native iESS read; writable via WRITABLE_SETTINGS.
+    "generatorStartChg", "generatorMaxChgCurrent",
 ]
 
 # Friendly mappings are limited to values established by the model-29 menu.
