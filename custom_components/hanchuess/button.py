@@ -108,13 +108,14 @@ class HanchuessReadSettingsButton(ButtonEntity):
                         "[HANCHUESS] Read Settings has no model-29 settings coordinator"
                     )
                     return
-                await coordinator.async_request_refresh()
+                await coordinator.async_refresh()
                 if not coordinator.last_update_success:
                     _LOGGER.warning("[HANCHUESS] Read Settings refresh failed")
                     return
                 _LOGGER.info(
-                    "[HANCHUESS] Read Settings refreshed %d model-29 values",
+                    "[HANCHUESS] Read Settings refreshed %d model-29 values at %s",
                     len(coordinator.data or {}),
+                    coordinator.last_update_success_time,
                 )
                 return
             values = await client.async_iot_get(
