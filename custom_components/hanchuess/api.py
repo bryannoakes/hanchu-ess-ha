@@ -84,7 +84,7 @@ class HanchuessApiClient:
                 headers = self._headers(language)
                 request_kwargs = {"json": data}
                 if not send_as_json:
-                    headers["Content-Type"] = "text/plain"
+                    headers.pop("Content-Type", None)
                     request_kwargs = {"data": data}
                 if extra_headers:
                     headers.update(extra_headers)
@@ -278,7 +278,7 @@ class HanchuessApiClient:
             payload,
             language=language,
             send_as_json=False,
-            extra_headers={"version": "1.0"},
+            extra_headers={"Content-Type": "text/plain", "version": "1.0"},
         )
         if result and result.get("success"):
             return result.get("data", {})
