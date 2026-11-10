@@ -44,3 +44,9 @@ Via the iESS UI (Energy Setup -> Set), `chgSocLmt` 98 -> 97 -> 98, both restored
 
 ## Safety rules
 Never write export/grid-sell options. One concept per write, capture original, restore after.
+
+## Status (2026-11-10)
+Implemented: allow-listed `chgSocLmt` write + read-back + Number entity; live-validated through HA
+(98->97->98, ~4-6 s to confirm, 49 rejected). Time (HHMM) and enum writes are NOT captured: the iESS UI
+only exposes period fields after enabling Timed Charge/Discharge, which changes inverter behaviour, so no
+live capture was done. Enum encodings are derivable from menu metadata but unproven; keep refused.

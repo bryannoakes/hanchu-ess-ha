@@ -18,6 +18,12 @@ later versions are tracked here going forward.
 - Generic settings and fast charge/discharge write controls are suppressed and
   server-side write paths are blocked for model 29 during validation.
 
+- HESS-HY-S-12K-S: guarded write for one setting, Battery SOC Stop Charge Limit
+  (`chgSocLmt`, 50-100), via the native `/platform/deviceNew/iotSet` payload captured
+  from the iESS app. Strict allow-list; every other key (including all grid-sell/export
+  options, time slots and enums) is refused. Each write is confirmed by reading the
+  value back, and failures raise a visible error.
+
 ### Fixed
 - HESS-HY-S-12K-S read-only settings sensors were never added to Home Assistant:
   they used `EntityCategory.CONFIG`, which HA rejects for sensors, so all 40
