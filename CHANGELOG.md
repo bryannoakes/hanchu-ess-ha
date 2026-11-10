@@ -10,6 +10,14 @@ later versions are tracked here going forward.
 
 ## [Unreleased]
 
+### Added
+- HESS-HY-S-12K-S/model 29 now reads its real platform settings through
+  encrypted `/platform/deviceNew/iotGet` using the existing HA-scoped token.
+  The model-specific values are exposed read-only because its control schema
+  differs materially from the generic HA settings API.
+- Generic settings and fast charge/discharge write controls are suppressed and
+  server-side write paths are blocked for model 29 during validation.
+
 ### Fixed
 - Setup now offers a manual inverter-serial fallback when Hanchu authentication
   succeeds but `/app/ha/getDeviceList` returns no devices. The supplied serial
