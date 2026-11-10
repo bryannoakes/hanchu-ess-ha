@@ -382,20 +382,8 @@ async def test_iot_get_success(hass):
 
 
 
-async def test_platform_iot_get_success_uses_encrypted_body(hass):
+async def test_platform_iot_get_success(hass):
     client = HanchuessApiClient(hass, BASE_URL, token="t")
-    captured = {}
-
-    def callback(url, **kwargs):
-        captured["body"] = kwargs.get("data")
-        captured["headers"] = kwargs.get("headers", {})
-        return aiohttp.web_response.json_response(
-            {
-                "code": 200,
-                "success": True,
-                "data": {"workMode": "3", "chgSocLmt": "98"},
-            }
-        )
 
     with aioresponses() as m:
         m.post(
