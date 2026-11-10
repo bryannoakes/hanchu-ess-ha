@@ -579,14 +579,16 @@ class HanchuessSettingsLastRefreshSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict:
+        data = self.coordinator.data or {}
         return {
             "last_update_success": self.coordinator.last_update_success,
-            "key_count": len(self.coordinator.data or {}),
+            "key_count": len(data),
             "last_exception": (
                 str(self.coordinator.last_exception)
                 if self.coordinator.last_exception is not None
                 else None
             ),
+            "raw_settings": dict(data),
         }
 
 
