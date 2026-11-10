@@ -63,3 +63,27 @@ live capture was done. Enum encodings are derivable from menu metadata but unpro
   pvChargingPriority, gridCharging), stop SOC/voltage/power per slot.
 - Documentation link for the 12K-S: https://oss-cdn.hanchuess.com/backend/document/pcs/HESS-HY-S-12K-S.pdf
   (not downloaded or read).
+
+## Status: full allow-list (2026-11-10, final)
+Source of truth: `WRITABLE_SETTINGS` in `custom_components/hanchuess/settings_12k.py` (ranges/options from the
+HA menu `/app/ha/menu` metadata). Entities are generated from it (`settings_12k_entities.py`).
+
+| Setting (cloud key) | Wire value | Live-tested | Notes |
+|---|---|---|---|
+| `chgSocLmt` | int 50-100 | yes (UI, API, HA) | |
+| `gridCharging` | 0/1 | yes (HA, on 6 s then off) | approved by user |
+| `timedChargeEnable`, `timedDischargeEnable` | 0/1 | yes (HA / API) | |
+| `generatorStartChg` | 0/1 | yes (HA) | |
+| `generatorMaxChgC` | number 0-60 | yes (HA) | key is `generatorMaxChgC`, not `...Current` |
+| `batDischgManagement` | 0,1,2 | yes 2<->1 (HA); 0 not tested | **3 (grid sell) refused** |
+| `pvChargingPriority` | 0,1 | yes 0<->1 (HA) | **2 (first to grid) refused** |
+| charge/discharge slot 1-3 start/end | "HHMM" string | yes all 12 (slot 1 via HA, 2-3 via API) | integers rejected by device |
+| `timePeriodN{Stop*Soc}` | int 0-100 | yes all 6 | |
+| `timePeriodN{Stop*V}` | number 40-59.5 | yes all 6 | sent as float, e.g. 57.5 |
+| `timePeriodN{MaxChgPwr,MaxDisChgPwr}` | int 0-12000 | yes all 6 | |
+| `timePeriodNStopChargingEnergySource` | 0 none,1 grid,2 gen,3 grid+gen | yes 0/1 | slot 1 original is 1 (grid) |
+| `workMode` | 2,3 (1 refused) | **no** | deliberately NOT writable: may reconfigure grid interaction house-wide |
+
+Deliberately never writable: power on/off (`enPower`), restart (`pcsRestart`), password, Wi-Fi clear, date/time,
+N-PE, startup/reconnect gradients, P-PF curve, anything not in the allow-list. Slots 2/3 write entities are
+disabled by default in the entity registry. Every live test restored the original value.

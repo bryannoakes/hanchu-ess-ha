@@ -24,9 +24,16 @@ later versions are tracked here going forward.
   options, time slots and enums) is refused. Each write is confirmed by reading the
   value back, and failures raise a visible error.
 
-- HESS-HY-S-12K-S: Timed Discharge Control switch and Discharge Slot 1 Start/End
-  Control time entities. Times are sent as `"HHMM"` strings; integer times are
-  rejected by the device.
+- HESS-HY-S-12K-S: data-driven writable controls generated from one allow-list
+  (`WRITABLE_SETTINGS`): grid charging, timed charge/discharge enables, generator
+  charging, Battery Energy Manage and PV Energy Manage selects, and all three
+  charge and discharge periods (start/end, stop SOC, stop voltage, max power,
+  charge energy source). Times are sent as `"HHMM"` strings (integers are rejected
+  by the device). Grid-export options (Battery to grid sell, First to grid, On Grid
+  mode) are never offered or accepted. Slot 2/3 entities are disabled by default.
+  Hybrid grid mode stays read-only.
+- Documentation: manual extraction (`docs/hess-hy-s-12k-s-manual.md`) and the
+  model-29 write matrix (`docs/model29-write-plan.md`).
 
 ### Fixed
 - HESS-HY-S-12K-S read-only settings sensors were never added to Home Assistant:

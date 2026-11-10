@@ -248,14 +248,19 @@ Twice yearly: airflow/radiator clean, inspect conductors, verify indications, ch
 
 ## 10. Mapping to this integration
 
-| Manual setting | Cloud key (iotGet/iotSet) | Write support in integration |
+Full write matrix and wire formats: [model29-write-plan.md](model29-write-plan.md). Summary:
+
+| Manual setting | Cloud key | Integration |
 |---|---|---|
-| Hybrid grid mode | `workMode` (1 On grid, 3 Limit to home load, other = limit to UPS load) | see [model29-write-plan.md](model29-write-plan.md) |
-| Grid charging enable | `gridCharging` 0/1 | see plan |
-| Battery energy manage | `batDischgManagement` 0–3 (3 = grid sell, never) | see plan |
-| PV energy manage | `pvChargingPriority` 0–2 (2 = to grid, never) | see plan |
-| Timed charge / discharge enable | `timedChargeEnable`, `timedDischargeEnable` | see plan |
-| Bat.SOC stop chg | `chgSocLmt` 50–100 | yes |
-| Period start/end | `startChgTimeN`, `endChgTimeN`, `startDischgTimeN`, `endDischgTimeN` ("HHMM" strings) | see plan |
-| Period stop SOC / stop V / max power / source | `timePeriodNStopChargingSoc/V`, `…MaxChgPwr`, `…StopChargingEnergySource`, `timePeriodNStopDischargingSoc/V`, `…MaxDisChgPwr` | see plan |
-| Generator charging enable / current | `generatorStartChg`, `generatorMaxChgC` (seen in native read, 0–60 A) | not supported |
+| Hybrid grid mode | `workMode` (1 On grid, 2 UPS load, 3 home load) | read-only (write not live-tested; option 1 would allow export) |
+| Grid charging enable | `gridCharging` 0/1 | writable switch |
+| Battery energy manage | `batDischgManagement` | writable select (0-2); "Battery to grid sell" never offered |
+| PV energy manage | `pvChargingPriority` | writable select (0-1); "First to grid" never offered |
+| Timed charge / discharge enable | `timedChargeEnable`, `timedDischargeEnable` | writable switches |
+| Bat.SOC stop chg | `chgSocLmt` 50-100 | writable number |
+| Period start/end (3+3) | `start/endChgTimeN`, `start/endDischgTimeN` ("HHMM" strings) | writable time entities (slots 2-3 disabled by default) |
+| Period stop SOC / stop V / max power (3+3) | `timePeriodN...` | writable numbers |
+| Period charging energy source (3) | `timePeriodNStopChargingEnergySource` (0 none, 1 grid, 2 gen, 3 grid+gen) | writable select |
+| Generator charging enable / max current | `generatorStartChg`, `generatorMaxChgC` | writable switch / number |
+| Power on/off, restart, password, N-PE, gradients, P-PF curve | `enPower`, `pcsRestart`, `passwordRead`, `enNpe`, `stPLdSped`, `reconPLdSped`, `activePwrSet` | not supported (by design) |
+| Battery manage voltages/currents, grid standard, CT ratio, sell/buy power, etc. (inverter LCD only) | not exposed in the cloud menu | not available |
