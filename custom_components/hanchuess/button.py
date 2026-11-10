@@ -10,6 +10,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .models import inverter_model_name
 from .const import DOMAIN
+from .settings_12k import PLATFORM_SETTING_KEYS, is_12k_s
 from . import HanchuessConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
@@ -57,10 +58,14 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: HanchuessConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     """Set up Read Settings and Write Settings button entities."""
-    async_add_entities([
-        HanchuessReadSettingsButton(hass, entry),
-        HanchuessWriteSettingsButton(hass, entry),
-    ])
+    entities = [HanchuessReadSettingsButton(hass, entry)]
+    if not is_12k_s(entry):
+        entities.append(HanchuessWriteSettingsButton(hass, entry))
+    else:
+        _LOGGER.info(
+            "[HANCHUESS] Write Settings button disabled for HESS-HY-S-12K-S"
+        )
+    async_add_entities(entities)
 
 
 # ---------------------------------------------------------------------------
@@ -96,9 +101,16 @@ class HanchuessReadSettingsButton(ButtonEntity):
         client = self._entry.runtime_data.realtime.client
         _LOGGER.info("[HANCHUESS] Read Settings pressed for %s", inverter_serial_number)
         try:
-            values = await client.async_iot_get(
-                inverter_serial_number, "2", ALL_CONTROL_KEYS
-            )
+            if is_12k_s(self._entry):
+                values = await client.async_platform_iot_get(
+                    inverter_serial_number,
+                    "2",
+                    PLATFORM_SETTING_KEYS,
+                )
+            else:
+                values = await client.async_iot_get(
+                    inverter_serial_number, "2", ALL_CONTROL_KEYS
+                )
         except Exception as err:  # noqa: BLE001
             _LOGGER.error("[HANCHUESS] Read Settings failed: %s", err)
             return
