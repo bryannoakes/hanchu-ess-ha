@@ -11,7 +11,7 @@ from homeassistant.exceptions import ConfigEntryNotReady
 import homeassistant.helpers.device_registry as dr
 import homeassistant.helpers.config_validation as cv
 from .const import DOMAIN, PLATFORMS, BASE_URL
-from .settings_12k import MODEL_CODE as MODEL_12K_CODE, PLATFORM_SETTING_KEYS
+from .settings_12k import MODEL_CODE as MODEL_12K_CODE
 from .api import HanchuessApiClient
 from .battery import merge_battery_serials
 from .models import (
