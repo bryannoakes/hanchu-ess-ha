@@ -24,6 +24,10 @@ later versions are tracked here going forward.
   options, time slots and enums) is refused. Each write is confirmed by reading the
   value back, and failures raise a visible error.
 
+- HESS-HY-S-12K-S: Timed Discharge Control switch and Discharge Slot 1 Start/End
+  Control time entities. Times are sent as `"HHMM"` strings; integer times are
+  rejected by the device.
+
 ### Fixed
 - HESS-HY-S-12K-S read-only settings sensors were never added to Home Assistant:
   they used `EntityCategory.CONFIG`, which HA rejects for sensors, so all 40

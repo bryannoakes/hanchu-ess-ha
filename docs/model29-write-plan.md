@@ -50,3 +50,16 @@ Implemented: allow-listed `chgSocLmt` write + read-back + Number entity; live-va
 (98->97->98, ~4-6 s to confirm, 49 rejected). Time (HHMM) and enum writes are NOT captured: the iESS UI
 only exposes period fields after enabling Timed Charge/Discharge, which changes inverter behaviour, so no
 live capture was done. Enum encodings are derivable from menu metadata but unproven; keep refused.
+
+## Update: timed discharge + times (live, 2026-11-10)
+- `timedDischargeEnable`: integer 0/1 works (iESS UI sends the same).
+- Times: **must be "HHMM" strings** (`"0300"`). Integers (`300`), which the iESS UI sent in my capture, were
+  rejected by the device (`responseSemMap` value `2`, HTTP-level `code 100 / 90008 Operation failed`);
+  a mixed batch partially succeeds (other keys apply, time keys don't), so always read back.
+- Periods can be edited while timed discharge is On or Off; slot fields only appear in the UI when it is On.
+- Implemented + live-validated through HA: Timed Discharge Control switch, Discharge Slot 1 Start/End
+  Control time entities (set 03:00/04:00, restored to 00:00, switch restored Off).
+- Still refused: timed CHARGE (can import from grid), slots 2/3, enums (workMode, batDischgManagement,
+  pvChargingPriority, gridCharging), stop SOC/voltage/power per slot.
+- Documentation link for the 12K-S: https://oss-cdn.hanchuess.com/backend/document/pcs/HESS-HY-S-12K-S.pdf
+  (not downloaded or read).
