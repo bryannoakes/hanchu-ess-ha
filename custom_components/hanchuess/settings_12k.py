@@ -40,7 +40,7 @@ PLATFORM_SETTING_KEYS: list[str] = [
     "timePeriod3StopDischargingSoc", "timePeriod3StopDischargingV",
     "timePeriod3MaxDisChgPwr",
     # Returned by the native iESS read; writable via WRITABLE_SETTINGS.
-    "generatorStartChg", "generatorMaxChgCurrent",
+    "generatorStartChg", "generatorMaxChgC",
 ]
 
 # Friendly mappings are limited to values established by the model-29 menu.
@@ -210,7 +210,7 @@ WRITABLE_SETTINGS: dict[str, dict] = {
     "timedChargeEnable": {"kind": "bool", "name": "Timed Charge Control"},
     "timedDischargeEnable": {"kind": "bool", "name": "Timed Discharge Control"},
     "generatorStartChg": {"kind": "bool", "name": "Generator Charging Control"},
-    "generatorMaxChgCurrent": {"kind": "int", "min": 0, "max": 60, "step": 1,
+    "generatorMaxChgC": {"kind": "float", "min": 0.0, "max": 60.0, "step": 1,
                                "name": "Generator Max Charging Current Control", "unit": "A"},
     # workMode is intentionally NOT writable yet: changing the hybrid grid mode can
     # reconfigure grid interaction for the whole house and has not been live-tested.

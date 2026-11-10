@@ -258,4 +258,4 @@ Twice yearly: airflow/radiator clean, inspect conductors, verify indications, ch
 | Bat.SOC stop chg | `chgSocLmt` 50–100 | yes |
 | Period start/end | `startChgTimeN`, `endChgTimeN`, `startDischgTimeN`, `endDischgTimeN` ("HHMM" strings) | see plan |
 | Period stop SOC / stop V / max power / source | `timePeriodNStopChargingSoc/V`, `…MaxChgPwr`, `…StopChargingEnergySource`, `timePeriodNStopDischargingSoc/V`, `…MaxDisChgPwr` | see plan |
-| Generator charging enable / current | `generatorStartChg`, `generatorMaxChgCurrent` (seen in native read, 0–60 A) | not supported |
+| Generator charging enable / current | `generatorStartChg`, `generatorMaxChgC` (seen in native read, 0–60 A) | not supported |

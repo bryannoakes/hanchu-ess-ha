@@ -178,7 +178,7 @@ def test_allowed_options_never_include_export():
 @pytest.mark.parametrize("key,value,expected", [
     ("timePeriod2StopDischargingV", 45, 45.0), ("timePeriod1StopChargingV", "57.6", 57.6),
     ("timePeriod3MaxChgPwr", 6600, 6600), ("timePeriod2MaxDisChgPwr", 0, 0),
-    ("timePeriod1StopChargingSoc", 52, 52), ("generatorMaxChgCurrent", 40, 40),
+    ("timePeriod1StopChargingSoc", 52, 52), ("generatorMaxChgC", 40, 40.0),
 ])
 def test_slot_numeric_ranges_accept(key, value, expected):
     assert validate_setting_write(key, value) == expected
@@ -187,7 +187,7 @@ def test_slot_numeric_ranges_accept(key, value, expected):
 @pytest.mark.parametrize("key,value", [
     ("timePeriod1StopChargingV", 39.9), ("timePeriod1StopChargingV", 60),
     ("timePeriod1MaxChgPwr", 12001), ("timePeriod1MaxChgPwr", -1),
-    ("timePeriod1StopDischargingSoc", 101), ("generatorMaxChgCurrent", 61),
+    ("timePeriod1StopDischargingSoc", 101), ("generatorMaxChgC", 60.5),
     ("startChgTime3", "2460"), ("endDischgTime2", "9"),
 ])
 def test_slot_numeric_ranges_reject(key, value):
@@ -197,7 +197,7 @@ def test_slot_numeric_ranges_reject(key, value):
 
 def test_every_writable_key_exists_in_platform_keys():
     from custom_components.hanchuess.settings_12k import PLATFORM_SETTING_KEYS, WRITABLE_SETTINGS
-    extra = {"generatorStartChg", "generatorMaxChgCurrent"}
+    extra = {"generatorStartChg", "generatorMaxChgC"}
     assert set(WRITABLE_SETTINGS) - extra <= set(PLATFORM_SETTING_KEYS)
 
 

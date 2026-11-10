@@ -19,7 +19,7 @@ Via the iESS UI (Energy Setup -> Set), `chgSocLmt` 98 -> 97 -> 98, both restored
 - Response: `{"code":200,"msg":"Success!","data":{"taskId":"RCT...","failCount":0,"successCount":1,
   "responseSemMap":{"chgSocLmt":"1"}},"success":true}` — asynchronous task; confirm by read-back.
 - iotGet confirmed 98 under both `ha` and `iess` tokens after restore.
-- The native read also returns `generatorStartChg` and `generatorMaxChgCurrent` (not in our schema).
+- The native read also returns `generatorStartChg` and `generatorMaxChgC` (not in our schema).
 - The UI has a settings history ("Record") panel listing every change with operator.
 
 - **`appPlat: ha` token CAN call `deviceNew/iotSet`** (tested with a no-change write of `chgSocLmt`=98 while
