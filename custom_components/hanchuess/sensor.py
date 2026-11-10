@@ -25,6 +25,7 @@ from .models import (
     lookup_battery_model,
 )
 from .const import DOMAIN
+from .settings_12k import SETTING_SENSORS, decode_setting_value, is_12k_s
 from . import HanchuessConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
@@ -449,6 +450,17 @@ async def async_setup_entry(
             if statistics.data.get(cond_key) != config.get("condition_value"):
                 continue
         entities.append(HanchueSensor(statistics, entry, sensor_key, config))
+    if is_12k_s(entry):
+        for setting_key, config in SETTING_SENSORS.items():
+            entities.append(
+                HanchuessReadOnlySettingSensor(
+                    entry,
+                    setting_key,
+                    config,
+                    data.startup_values,
+                )
+            )
+
     if battery_coordinator and entry.data.get("battery_serials"):
         for battery_serial in entry.data.get("battery_serials", []):
             battery_data = battery_coordinator.data.get(battery_serial, {})
@@ -477,8 +489,10 @@ async def async_setup_entry(
                     BatterySensor(battery_coordinator, entry, battery_serial, sensor_key, config)
                 )
     async_add_entities(entities)
-    # Add the pending settings count sensor (no coordinator — driven by staging buffer)
-    async_add_entities([HanchuessSettingsPendingSensor(entry)])
+    # Generic staged settings do not apply to model 29; expose the pending
+    # sensor only on models that use the generic writable schema.
+    if not is_12k_s(entry):
+        async_add_entities([HanchuessSettingsPendingSensor(entry)])
     # Static model/rating sensors, resolved once at setup from devModel
     async_add_entities(
         [
@@ -487,6 +501,54 @@ async def async_setup_entry(
             HanchuessModelSensor(entry, "battery_power_max"),
         ]
     )
+
+
+class HanchuessReadOnlySettingSensor(SensorEntity):
+    """Read-only model-29 setting populated from platform deviceNew/iotGet."""
+
+    _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, entry, setting_key: str, config: dict, startup_values: dict):
+        self._entry = entry
+        self._setting_key = setting_key
+        self._config = config
+        inverter_serial_number = entry.data["sn"]
+        self._attr_unique_id = f"{inverter_serial_number}_setting_{setting_key}"
+        self._attr_name = config["name"]
+        self._attr_icon = config.get("icon")
+        if config.get("unit"):
+            self._attr_native_unit_of_measurement = config["unit"]
+        self._attr_native_value = decode_setting_value(
+            setting_key,
+            startup_values.get(setting_key),
+        )
+
+    async def async_added_to_hass(self) -> None:
+        """Register for updates from the Read Settings button."""
+        self._entry.runtime_data.control_registry[self._setting_key] = self
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        inverter_serial_number = self._entry.data["sn"]
+        return DeviceInfo(
+            identifiers={(DOMAIN, inverter_serial_number)},
+            name=f"Hanchuess {inverter_serial_number}",
+            manufacturer="Hanchu",
+            model=inverter_model_name(self._entry),
+        )
+
+    def apply_value(self, raw) -> None:
+        """Apply one freshly read platform setting."""
+        self._attr_native_value = decode_setting_value(self._setting_key, raw)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return {
+            "source": "gateway/platform/deviceNew/iotGet",
+            "read_only": True,
+            "platform_key": self._setting_key,
+        }
 
 
 class HanchueSensor(CoordinatorEntity, SensorEntity):
