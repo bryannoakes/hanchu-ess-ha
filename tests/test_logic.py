@@ -743,3 +743,31 @@ def test_pending_sensor_resets_to_zero_after_clear():
 def test_pending_sensor_unique_id():
     sensor, _ = _make_pending_sensor("MYSERIAL")
     assert sensor.unique_id == "MYSERIAL_pending_settings_changes"
+
+
+# ---------------------------------------------------------------------------
+# HESS-HY-S-12K-S read-only settings decoder
+# ---------------------------------------------------------------------------
+
+from custom_components.hanchuess.settings_12k import decode_setting_value
+
+
+def test_12k_setting_decodes_hhmm():
+    assert decode_setting_value("startChgTime1", "0730") == "07:30"
+
+
+def test_12k_setting_decodes_zero_hhmm():
+    assert decode_setting_value("startDischgTime1", "0000") == "00:00"
+
+
+def test_12k_setting_decodes_known_mode():
+    assert decode_setting_value("batDischgManagement", "2") == "Battery to home load"
+
+
+def test_12k_setting_decodes_numeric_units():
+    assert decode_setting_value("chgSocLmt", "98") == 98
+    assert decode_setting_value("timePeriod1MaxChgPwr", "6600") == 6600
+
+
+def test_12k_setting_preserves_unknown_enum_value():
+    assert decode_setting_value("workMode", "2") == "2"
