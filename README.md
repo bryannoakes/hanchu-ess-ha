@@ -223,6 +223,21 @@ in again by itself if the Hanchu cloud rejects its session (see
 integrations, they are kept in Home Assistant's own config storage, and they are
 redacted from diagnostics files.
 
+### HESS-HY-S-12K-S settings
+
+The HESS-HY-S-12K-S (model code 29) exposes a different settings schema from
+the generic Hanchu HA control API. On this model, `/app/ha/iotGet` can return
+code `100` / data `900001`, while the same HA-scoped token succeeds against
+the encrypted `/platform/deviceNew/iotGet` endpoint.
+
+For model 29 the integration therefore reads the platform settings schema and
+exposes those values as **read-only configuration sensors**. The generic Work
+Mode, number, time-slot, Write Settings, and Fast Charge/Discharge controls are
+not created for this model during validation. This is intentional: the 12K-S
+menu exposes separate Hybrid grid mode, Battery energy manage, PV energy manage,
+timed charge/discharge enables, and per-period limits whose semantics do not map
+safely to the generic writable controls.
+
 ### First-time setup
 
 If your account has never been used on the Hanchu web console, the setup flow
