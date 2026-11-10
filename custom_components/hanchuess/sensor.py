@@ -454,10 +454,10 @@ async def async_setup_entry(
         for setting_key, config in SETTING_SENSORS.items():
             entities.append(
                 HanchuessReadOnlySettingSensor(
+                    data.settings,
                     entry,
                     setting_key,
                     config,
-                    data.startup_values,
                 )
             )
 
@@ -503,13 +503,14 @@ async def async_setup_entry(
     )
 
 
-class HanchuessReadOnlySettingSensor(SensorEntity):
-    """Read-only model-29 setting populated from platform deviceNew/iotGet."""
+class HanchuessReadOnlySettingSensor(CoordinatorEntity, SensorEntity):
+    """Read-only model-29 setting backed by the settings coordinator."""
 
     _attr_has_entity_name = True
     _attr_entity_category = EntityCategory.CONFIG
 
-    def __init__(self, entry, setting_key: str, config: dict, startup_values: dict):
+    def __init__(self, coordinator, entry, setting_key: str, config: dict):
+        super().__init__(coordinator)
         self._entry = entry
         self._setting_key = setting_key
         self._config = config
@@ -519,14 +520,6 @@ class HanchuessReadOnlySettingSensor(SensorEntity):
         self._attr_icon = config.get("icon")
         if config.get("unit"):
             self._attr_native_unit_of_measurement = config["unit"]
-        self._attr_native_value = decode_setting_value(
-            setting_key,
-            startup_values.get(setting_key),
-        )
-
-    async def async_added_to_hass(self) -> None:
-        """Register for updates from the Read Settings button."""
-        self._entry.runtime_data.control_registry[self._setting_key] = self
 
     @property
     def device_info(self) -> DeviceInfo:
@@ -538,9 +531,13 @@ class HanchuessReadOnlySettingSensor(SensorEntity):
             model=inverter_model_name(self._entry),
         )
 
-    def apply_value(self, raw) -> None:
-        """Apply one freshly read platform setting."""
-        self._attr_native_value = decode_setting_value(self._setting_key, raw)
+    @property
+    def native_value(self):
+        data = self.coordinator.data or {}
+        return decode_setting_value(
+            self._setting_key,
+            data.get(self._setting_key),
+        )
 
     @property
     def extra_state_attributes(self) -> dict:
