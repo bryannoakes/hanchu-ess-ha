@@ -22,9 +22,12 @@ Via the iESS UI (Energy Setup -> Set), `chgSocLmt` 98 -> 97 -> 98, both restored
 - The native read also returns `generatorStartChg` and `generatorMaxChgCurrent` (not in our schema).
 - The UI has a settings history ("Record") panel listing every change with operator.
 
+- **`appPlat: ha` token CAN call `deviceNew/iotSet`** (tested with a no-change write of `chgSocLmt`=98 while
+  it was already 98): code 200, successCount 1, value unchanged on read-back. No iess login needed.
+
 ## Still open (was: open questions)
 1. ~~Key naming~~ answered for ints (above); still unknown: HHMM time format and enum encodings.
-2. Whether the ha-flavoured token may call `deviceNew/iotSet` or it is iess-only.
+2. ~~ha token on iotSet~~ answered: allowed.
 3. What `skipCheckLock` and the control-permission/lock check do.
 4. Response shape and how success is confirmed (read-back via `iotGet`).
 
