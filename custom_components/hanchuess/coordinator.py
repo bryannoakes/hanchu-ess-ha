@@ -4,7 +4,11 @@ import logging
 from datetime import timedelta
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.helpers.update_coordinator import (
+    DataUpdateCoordinator,
+    TimestampDataUpdateCoordinator,
+    UpdateFailed,
+)
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from .api import HanchuessApiClient, ReauthRequired
 from .settings_12k import PLATFORM_SETTING_KEYS
@@ -140,7 +144,7 @@ class HanchuessStatisticsCoordinator(DataUpdateCoordinator):
             )
 
 
-class HanchuessSettingsCoordinator(DataUpdateCoordinator):
+class HanchuessSettingsCoordinator(TimestampDataUpdateCoordinator):
     """On-demand model-29 settings coordinator.
 
     Settings are intentionally not polled periodically. They refresh at startup
