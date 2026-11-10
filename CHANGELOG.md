@@ -19,6 +19,9 @@ later versions are tracked here going forward.
   server-side write paths are blocked for model 29 during validation.
 
 ### Fixed
+- HESS-HY-S-12K-S Read Settings now refreshes a dedicated on-demand settings
+  coordinator, so model-29 read-only setting sensors update after the button is
+  pressed instead of retaining only their startup values.
 - Setup now offers a manual inverter-serial fallback when Hanchu authentication
   succeeds but `/app/ha/getDeviceList` returns no devices. The supplied serial
   is validated with `getDeviceStatus`, after which the existing station and
