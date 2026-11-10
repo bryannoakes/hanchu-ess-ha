@@ -832,3 +832,11 @@ def test_12k_settings_last_refresh_sensor_exposes_coordinator_timestamp():
     assert sensor.native_value == coordinator.last_update_success_time
     assert sensor.extra_state_attributes["key_count"] == 2
     assert sensor.extra_state_attributes["last_update_success"] is True
+
+
+def test_read_only_setting_sensor_category_is_valid_for_sensors():
+    """HA rejects sensor entities with entity_category=config at add time."""
+    from homeassistant.const import EntityCategory
+    from custom_components.hanchuess.sensor import HanchuessReadOnlySettingSensor
+
+    assert HanchuessReadOnlySettingSensor._attr_entity_category is not EntityCategory.CONFIG

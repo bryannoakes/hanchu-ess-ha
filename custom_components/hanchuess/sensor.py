@@ -508,7 +508,7 @@ class HanchuessReadOnlySettingSensor(CoordinatorEntity, SensorEntity):
     """Read-only model-29 setting backed by the settings coordinator."""
 
     _attr_has_entity_name = True
-    _attr_entity_category = EntityCategory.CONFIG
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(self, coordinator, entry, setting_key: str, config: dict):
         super().__init__(coordinator)
