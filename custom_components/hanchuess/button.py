@@ -10,7 +10,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .models import inverter_model_name
 from .const import DOMAIN
-from .settings_12k import PLATFORM_SETTING_KEYS, is_12k_s
+from .settings_12k import is_12k_s
 from . import HanchuessConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
