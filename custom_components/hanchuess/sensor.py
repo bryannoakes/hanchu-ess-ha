@@ -121,6 +121,8 @@ SENSORS = {
         "icon": "mdi:home-lightning-bolt",
         "auto_watt": True,
         "unit_key": "loadEpsPwrUnit",
+        # Older/other responses carry the same aggregate as loadPwr (always W).
+        "fallback_key": "loadPwr",
     },
     "dg_power": {
         "key": "dgPAcTotal",
@@ -627,6 +629,9 @@ class HanchueSensor(CoordinatorEntity, SensorEntity):
     @property
     def native_value(self):
         value = self.coordinator.data.get(self._config["key"])
+        if value is None and self._config.get("fallback_key"):
+            # Fallback field carries no unit sibling and is reported raw.
+            return self.coordinator.data.get(self._config["fallback_key"])
         if value is None:
             return None
         if self._config.get("auto_watt"):

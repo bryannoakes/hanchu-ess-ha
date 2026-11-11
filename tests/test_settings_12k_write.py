@@ -80,6 +80,7 @@ async def test_platform_iot_set_partial_failure_is_failure(hass):
 def _coordinator(set_result, reads):
     entry = MagicMock()
     entry.data = {"sn": "SN1"}
+    entry.options = {}
     client = MagicMock()
     client.async_platform_iot_set = AsyncMock(return_value=set_result)
     client.async_platform_iot_get = AsyncMock(side_effect=reads)
@@ -212,7 +213,9 @@ def test_entities_built_from_allow_list_and_select_hides_export():
 
     entry = MagicMock()
     entry.data = {"sn": "SN1"}
-    ents = build_entities(entry, MagicMock(), ("int", "float", "bool", "enum", "hhmm"))
+    coord = MagicMock()
+    coord.allow_grid_export = False
+    ents = build_entities(entry, coord, ("int", "float", "bool", "enum", "hhmm"))
     assert {e._key for e in ents} == set(WRITABLE_SETTINGS)
     assert len({e.unique_id for e in ents}) == len(ents)
     selects = {e._key: e for e in ents if e._key in ("batDischgManagement", "pvChargingPriority")}
@@ -241,3 +244,47 @@ def test_work_mode_accepts_only_non_export_options(value, expected):
 def test_work_mode_refuses_on_grid_and_unknown(value):
     with pytest.raises(SettingWriteError):
         validate_setting_write("workMode", value)
+
+
+# --- Opt-in grid export (default off, user-configurable) --------------------
+
+@pytest.mark.parametrize("key,value", [("workMode", 1), ("batDischgManagement", 3), ("pvChargingPriority", 2)])
+def test_export_values_allowed_only_when_opted_in(key, value):
+    with pytest.raises(SettingWriteError, match="Allow grid export"):
+        validate_setting_write(key, value)
+    assert validate_setting_write(key, value, allow_export=True) == value
+
+
+def test_allowed_options_include_export_only_when_opted_in():
+    from custom_components.hanchuess.settings_12k import allowed_options
+    assert 1 in allowed_options("workMode", True) and 1 not in allowed_options("workMode")
+    assert 3 in allowed_options("batDischgManagement", True)
+    assert 2 in allowed_options("pvChargingPriority", True)
+
+
+def test_opt_in_does_not_widen_other_validation():
+    with pytest.raises(SettingWriteError):
+        validate_setting_write("workMode", 4, allow_export=True)
+    with pytest.raises(SettingWriteError):
+        validate_setting_write("enPower", 1, allow_export=True)
+
+
+def test_select_offers_labelled_export_options_when_opted_in():
+    from custom_components.hanchuess.settings_12k_entities import build_entities
+    entry = MagicMock(); entry.data = {"sn": "SN1"}
+    coord = MagicMock(); coord.allow_grid_export = True
+    sel = {e._key: e for e in build_entities(entry, coord, ("enum",))}
+    assert "Battery to grid sell (grid export)" in sel["batDischgManagement"].options
+    assert "On Grid (grid export)" in sel["workMode"].options
+    coord.data = {"workMode": "1"}
+    assert sel["workMode"].current_option == "On Grid (grid export)"
+
+
+async def test_coordinator_uses_entry_option_for_export_gate():
+    coord, client = _coordinator({"success": True}, [{"workMode": "1"}])
+    coord.entry.options = {}
+    with pytest.raises(HomeAssistantError, match="Allow grid export"):
+        await coord.async_write_setting("workMode", 1, delay=0)
+    client.async_platform_iot_set.assert_not_awaited()
+    coord.entry.options = {"allow_grid_export": True}
+    assert await coord.async_write_setting("workMode", 1, delay=0) == 1

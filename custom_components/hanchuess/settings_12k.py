@@ -239,9 +239,13 @@ for _slot in (1, 2, 3):
     }
 
 
-def allowed_options(key: str) -> dict[int, str]:
-    """Selectable options for an enum key, with export-related values removed."""
-    refused = GRID_EXPORT_REFUSED.get(key, set())
+def allowed_options(key: str, allow_export: bool = False) -> dict[int, str]:
+    """Selectable options for an enum key.
+
+    Options that allow grid export are only included when the user has opted in
+    (config-entry option ``allow_grid_export``, default off).
+    """
+    refused = set() if allow_export else GRID_EXPORT_REFUSED.get(key, set())
     return {v: n for v, n in ENUM_OPTIONS.get(key, {}).items() if v not in refused}
 
 
@@ -258,8 +262,11 @@ def _to_number(key: str, value) -> float:
         raise SettingWriteError(f"{key}: {value!r} is not a number") from None
 
 
-def validate_setting_write(key: str, value):
-    """Return the value to send (int, float or "HHMM" str), or raise SettingWriteError."""
+def validate_setting_write(key: str, value, allow_export: bool = False):
+    """Return the value to send (int, float or "HHMM" str), or raise SettingWriteError.
+
+    Grid-export option values are refused unless ``allow_export`` is True.
+    """
     spec = WRITABLE_SETTINGS.get(key)
     if spec is None:
         raise SettingWriteError(f"Writing {key} is not enabled for HESS-HY-S-12K-S")
@@ -286,9 +293,10 @@ def validate_setting_write(key: str, value):
             raise SettingWriteError(f"{key}: must be 0 or 1")
         return number
     if kind == "enum":
-        if number in GRID_EXPORT_REFUSED.get(key, set()):
+        if not allow_export and number in GRID_EXPORT_REFUSED.get(key, set()):
             raise SettingWriteError(
-                f"{key}={number} is refused: it allows grid export, which is disabled"
+                f"{key}={number} is refused: it allows grid export, which is disabled "
+                "(enable \"Allow grid export settings\" in the integration options)"
             )
         if number not in ENUM_OPTIONS.get(key, {}):
             raise SettingWriteError(f"{key}: {number} is not a valid option")

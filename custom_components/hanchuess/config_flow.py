@@ -6,6 +6,7 @@ import homeassistant.helpers.config_validation as cv
 from homeassistant import config_entries
 from homeassistant.config_entries import OptionsFlowWithReload
 from homeassistant.core import callback
+from .settings_12k import is_12k_s
 from .const import (
     DOMAIN,
     BASE_URL,
@@ -14,6 +15,7 @@ from .const import (
     CONF_STATISTICS_INTERVAL,
     CONF_BATTERY_INTERVAL,
     CONF_FAST_CHARGE_DURATION,
+    CONF_ALLOW_GRID_EXPORT,
     DEFAULT_REALTIME_INTERVAL,
     DEFAULT_STATISTICS_INTERVAL,
     DEFAULT_BATTERY_INTERVAL,
@@ -339,5 +341,13 @@ class HanchuessOptionsFlow(OptionsFlowWithReload):
                 default=options.get(CONF_FAST_CHARGE_DURATION, DEFAULT_FAST_CHARGE_DURATION),
             ): vol.All(vol.Coerce(int), vol.Range(min=5, max=240)),
         })
+        if is_12k_s(self.config_entry):
+            # Model 29 only: opt in to option values that allow grid export.
+            data_schema = data_schema.extend({
+                vol.Required(
+                    CONF_ALLOW_GRID_EXPORT,
+                    default=options.get(CONF_ALLOW_GRID_EXPORT, False),
+                ): bool,
+            })
 
         return self.async_show_form(step_id="init", data_schema=data_schema)

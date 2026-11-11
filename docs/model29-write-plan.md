@@ -87,3 +87,16 @@ HA menu `/app/ha/menu` metadata). Entities are generated from it (`settings_12k_
 Deliberately never writable: power on/off (`enPower`), restart (`pcsRestart`), password, Wi-Fi clear, date/time,
 N-PE, startup/reconnect gradients, P-PF curve, anything not in the allow-list. Slots 2/3 write entities are
 disabled by default in the entity registry. Every live test restored the original value.
+
+## Grid export is an opt-in (2026-11-11)
+`GRID_EXPORT_REFUSED` options (`workMode` 1, `batDischgManagement` 3, `pvChargingPriority` 2) are refused by
+`validate_setting_write` and hidden from selects unless the config-entry option `allow_grid_export` is true
+(options flow, model 29 only, default off, entry reloads on change). With it on, the options appear labelled
+"(grid export)". Live check: option off -> 2/3/2 options; option on -> export options listed; option restored off.
+No export value was ever written to the inverter (local regulation); the write path for them is covered by unit tests only.
+
+## Load power evidence (2026-11-11)
+Upstream samples (PR 11, 16, 17; devModel 2 and 4, June 2026): `loadPwr` (W) equals `loadEpsPwr` (kW) x 1000, so
+`loadEpsPwr` is the same aggregate with an explicit unit. Model 29 (Nov 2026): `loadPwr` = 0.0 while `loadEpsPwr` = 2.02 kW
+and PV 2.24 + grid 0.02 = load 2.02 + battery 0.24. Not separable from available data: model-29-specific vs a later Hanchu change.
+The sensor therefore prefers `loadEpsPwr` and falls back to `loadPwr`.

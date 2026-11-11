@@ -239,9 +239,11 @@ stop SOC, stop voltage, max power, charge energy source). Every write is
 validated, sent through the encrypted `iotSet` endpoint and **confirmed by
 reading the value back**; an unconfirmed write raises an error.
 
-Grid export is never configurable from Home Assistant: "Battery to grid sell",
-"First to grid" and Hybrid grid mode "On Grid" are not offered and are refused
-if requested. Power on/off, restart, password, date/time and the other advanced
+Grid export is **off by default**: "Battery to grid sell", "First to grid" and
+Hybrid grid mode "On Grid" are not offered and are refused if requested. They
+can be made selectable (labelled "(grid export)") with the integration option
+**Allow grid export settings**, which only appears for this model. Enable it
+only if your network operator and local regulations permit export. Power on/off, restart, password, date/time and the other advanced
 settings are not writable. The generic Work Mode, Write Settings and Fast
 Charge/Discharge controls are not created for this model. Charge/discharge
 periods 2 and 3 are disabled by default in the entity registry. See

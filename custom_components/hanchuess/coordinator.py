@@ -196,6 +196,11 @@ class HanchuessSettingsCoordinator(TimestampDataUpdateCoordinator):
         return data
 
 
+    @property
+    def allow_grid_export(self) -> bool:
+        """True only when the user opted in to export-capable options."""
+        return bool(self.entry.options.get("allow_grid_export", False))
+
     async def async_write_setting(
         self, key: str, value, *, attempts: int = 6, delay: float = 3.0
     ):
@@ -209,7 +214,9 @@ class HanchuessSettingsCoordinator(TimestampDataUpdateCoordinator):
         from .settings_12k import SettingWriteError, validate_setting_write
 
         try:
-            number = validate_setting_write(key, value)
+            number = validate_setting_write(
+                key, value, allow_export=self.allow_grid_export
+            )
         except SettingWriteError as err:
             raise HomeAssistantError(str(err)) from err
         sn = self.entry.data["sn"]
