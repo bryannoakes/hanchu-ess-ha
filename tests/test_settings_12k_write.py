@@ -288,3 +288,67 @@ async def test_coordinator_uses_entry_option_for_export_gate():
     client.async_platform_iot_set.assert_not_awaited()
     coord.entry.options = {"allow_grid_export": True}
     assert await coord.async_write_setting("workMode", 1, delay=0) == 1
+
+
+# --- Staged writes (uniform with the generic staging layer) ------------------
+
+def _staged_entity(key, current):
+    from types import SimpleNamespace
+    from custom_components.hanchuess.settings_12k_entities import build_entities
+    from custom_components.hanchuess.staging import SettingsStagingBuffer
+
+    entry = MagicMock()
+    entry.data = {"sn": "SN1"}
+    entry.runtime_data = SimpleNamespace(staging=SettingsStagingBuffer())
+    coord = MagicMock()
+    coord.allow_grid_export = False
+    coord.data = {key: current}
+    ent = next(e for e in build_entities(entry, coord, ("int", "float", "bool", "enum", "hhmm")) if e._key == key)
+    ent.async_write_ha_state = MagicMock()
+    return ent, entry.runtime_data.staging, coord
+
+
+async def test_entity_change_is_staged_not_sent():
+    ent, staging, coord = _staged_entity("gridCharging", "0")
+    await ent.async_turn_on()
+    assert staging.snapshot() == {"gridCharging": 1}
+    assert ent.is_on is True and ent.extra_state_attributes["pending_write"] is True
+    coord.async_write_setting.assert_not_called()
+
+
+async def test_entity_returning_to_device_value_unstages():
+    ent, staging, _ = _staged_entity("gridCharging", "0")
+    await ent.async_turn_on()
+    await ent.async_turn_off()
+    assert staging.snapshot() == {}
+    assert ent.is_on is False
+
+
+async def test_entity_rejects_invalid_value_at_stage_time():
+    ent, staging, _ = _staged_entity("chgSocLmt", "98")
+    with pytest.raises(HomeAssistantError):
+        await ent.async_set_native_value(10)
+    assert staging.snapshot() == {}
+
+
+async def test_entity_refuses_export_value_at_stage_time_by_default():
+    ent, staging, _ = _staged_entity("batDischgManagement", "2")
+    with pytest.raises(HomeAssistantError, match="Allow grid export"):
+        await ent._write(3)
+    assert staging.snapshot() == {}
+
+
+async def test_flush_writes_each_key_and_clears_confirmed_only():
+    from custom_components.hanchuess.staging import SettingsStagingBuffer
+    from unittest.mock import patch
+    coord, client = _coordinator(
+        {"success": True}, [{"chgSocLmt": "97"}] + [{"gridCharging": "0"}] * 6
+    )
+    staging = SettingsStagingBuffer()
+    staging.stage("chgSocLmt", 97)
+    staging.stage("gridCharging", 1)  # read-back never confirms
+    with patch("custom_components.hanchuess.coordinator.asyncio.sleep", new=AsyncMock()):
+        errors = await coord.async_write_staged(staging)
+    assert list(errors) == ["gridCharging"] and "did not confirm" in errors["gridCharging"]
+    assert staging.snapshot() == {"gridCharging": 1}
+    assert client.async_platform_iot_set.await_count == 2

@@ -201,6 +201,24 @@ class HanchuessSettingsCoordinator(TimestampDataUpdateCoordinator):
         """True only when the user opted in to export-capable options."""
         return bool(self.entry.options.get("allow_grid_export", False))
 
+    async def async_write_staged(self, staging) -> dict[str, str]:
+        """Write every staged key through the guarded writer, one key at a time.
+
+        Each key is validated, sent, and confirmed by read-back.  Confirmed keys
+        leave the staging buffer; failed keys stay staged.  Returns {key: error}.
+        """
+        from homeassistant.exceptions import HomeAssistantError
+
+        errors: dict[str, str] = {}
+        for key, value in staging.snapshot().items():
+            try:
+                await self.async_write_setting(key, value)
+            except HomeAssistantError as err:
+                errors[key] = str(err)
+            else:
+                staging.discard([key])
+        return errors
+
     async def async_write_setting(
         self, key: str, value, *, attempts: int = 6, delay: float = 3.0
     ):

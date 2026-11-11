@@ -492,10 +492,7 @@ async def async_setup_entry(
                     BatterySensor(battery_coordinator, entry, battery_serial, sensor_key, config)
                 )
     async_add_entities(entities)
-    # Generic staged settings do not apply to model 29; expose the pending
-    # sensor only on models that use the generic writable schema.
-    if not is_12k_s(entry):
-        async_add_entities([HanchuessSettingsPendingSensor(entry)])
+    async_add_entities([HanchuessSettingsPendingSensor(entry)])
     # Static model/rating sensors, resolved once at setup from devModel
     async_add_entities(
         [

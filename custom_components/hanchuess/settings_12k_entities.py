@@ -48,11 +48,45 @@ class _Base(CoordinatorEntity):
         )
 
     @property
+    def _staged(self):
+        return self._entry.runtime_data.staging.pending.get(self._key)
+
+    @property
     def _raw(self):
+        """Staged (pending) value if any, otherwise the last value read."""
+        staged = self._staged
+        if staged is not None:
+            return staged
         return (self.coordinator.data or {}).get(self._key)
 
+    @property
+    def extra_state_attributes(self) -> dict:
+        return {"pending_write": self._staged is not None}
+
     async def _write(self, value):
-        await self.coordinator.async_write_setting(self._key, value)
+        """Stage a validated change, like the generic entities do.
+
+        Nothing is sent until Write Settings (or hanchuess.write_settings) runs
+        the guarded writer.  Invalid / refused values fail here, immediately.
+        """
+        from homeassistant.exceptions import HomeAssistantError
+
+        from .coordinator import _same
+        from .settings_12k import SettingWriteError, validate_setting_write
+
+        try:
+            number = validate_setting_write(
+                self._key, value, allow_export=self.coordinator.allow_grid_export
+            )
+        except SettingWriteError as err:
+            raise HomeAssistantError(str(err)) from err
+        staging = self._entry.runtime_data.staging
+        current = (self.coordinator.data or {}).get(self._key)
+        if _same(current, number):
+            staging.discard([self._key])  # back to the device value: nothing to write
+        else:
+            staging.stage(self._key, number)
+        self.async_write_ha_state()
 
 
 class SettingNumber(_Base, NumberEntity):
