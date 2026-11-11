@@ -16,6 +16,13 @@
           "devices": "Devices"
         }
       },
+      "manual_serial": {
+        "title": "Enter inverter serial number",
+        "description": "No inverter was discovered automatically. Enter the inverter serial number shown in the Hanchu app or web console. Battery packs will still be discovered automatically from the station.",
+        "data": {
+          "serial_number": "Inverter serial number"
+        }
+      },
       "reauth_confirm": {
         "title": "Re-authenticate Hanchuess",
         "description": "Your token has expired. Please re-enter your credentials.",
@@ -29,6 +36,7 @@
       "auth_failed": "Authentication failed, please check your credentials",
       "cannot_connect": "Cannot connect to server",
       "no_devices": "No devices found under this account",
+      "serial_lookup_failed": "Could not access an inverter with that serial number",
       "station_lookup_failed": "Could not load station details",
       "battery_lookup_failed": "Could not load battery details. If you have never logged into the Hanchu web console, log in once at {console_url}, log out, then try again."
     },

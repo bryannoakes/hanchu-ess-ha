@@ -16,6 +16,12 @@ later versions are tracked here going forward.
   aiohttp 3.14 requires, so a small shim in `tests/conftest.py` supplies it. Test code only;
   CI (aiohttp 3.13) does not need it and the integration is unchanged.
 
+### Fixed
+- Setup now offers a manual inverter-serial fallback when Hanchu authentication
+  succeeds but `/app/ha/getDeviceList` returns no devices. The supplied serial
+  is validated with `getDeviceStatus`, after which the existing station and
+  automatic battery discovery flow continues unchanged.
+
 ## [2.4.0] - 2026-11-11
 
 ### Added

@@ -56,6 +56,7 @@ class HanchuessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._devices = await shared_client.async_get_devices()
             if self._devices:
                 return await self.async_step_select_device()
+            return await self.async_step_manual_serial()
 
         errors = {}
         if user_input is not None:
@@ -71,7 +72,7 @@ class HanchuessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._devices = await client.async_get_devices()
                 if self._devices:
                     return await self.async_step_select_device()
-                errors["base"] = "no_devices"
+                return await self.async_step_manual_serial()
             else:
                 errors["base"] = "auth_failed"
 
@@ -89,6 +90,65 @@ class HanchuessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if self._account and self._password:
             return {"account": self._account, "password": self._password}
         return {}
+
+    async def async_step_manual_serial(self, user_input=None):
+        """Fallback step when Hanchu device discovery returns no inverters."""
+        errors = {}
+        schema = vol.Schema({
+            vol.Required("serial_number"): str,
+        })
+
+        if user_input is not None:
+            inverter_serial_number = user_input["serial_number"].strip()
+            client = self._client or HanchuessApiClient(
+                self.hass, BASE_URL, token=self._token
+            )
+            self._client = client
+
+            language = self.hass.config.language or "en"
+            device_status = await client.async_get_device_status(
+                inverter_serial_number, language
+            )
+            station_id = (
+                device_status.get("stationId") if device_status else None
+            )
+            if not station_id:
+                errors["base"] = "serial_lookup_failed"
+            else:
+                station_detail = await client.async_get_station_detail(
+                    station_id, language
+                )
+                if not station_detail:
+                    errors["base"] = "battery_lookup_failed"
+                    return self.async_show_form(
+                        step_id="manual_serial",
+                        data_schema=schema,
+                        errors=errors,
+                        description_placeholders={"console_url": WEB_CONSOLE_URL},
+                    )
+
+                await self.async_set_unique_id(inverter_serial_number)
+                self._abort_if_unique_id_configured()
+
+                battery_serials = extract_battery_serials(station_detail)
+                return self.async_create_entry(
+                    title=f"Hanchuess {inverter_serial_number}",
+                    data={
+                        "sn": inverter_serial_number,
+                        "dev_type": "2",
+                        "token": self._token,
+                        **self._credentials(),
+                        "stationId": station_id,
+                        "battery_serials": battery_serials,
+                        "pending_devices": [],
+                    },
+                )
+
+        return self.async_show_form(
+            step_id="manual_serial",
+            data_schema=schema,
+            errors=errors,
+        )
 
     async def async_step_select_device(self, user_input=None):
         """Step 2: Select devices (multi-select)."""

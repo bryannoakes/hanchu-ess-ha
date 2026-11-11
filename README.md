@@ -206,13 +206,17 @@ From 2026.11, HACS is built into Home Assistant as the **Marketplace**. You must
 
 ## Configuration
 
-The setup flow only asks for your Hanchu app credentials — it then discovers your
-devices automatically:
+The setup flow normally discovers your inverters automatically:
 
 1. Enter your Hanchu app **email address** and **password**.
 2. The integration logs in and lists the inverters on your account. **Select the
    device(s)** you want to add. Each selected device is created as its own HA
-   device; no serial number needs to be entered by hand.
+   device.
+3. If Hanchu's device-list API returns no inverters, the integration falls back
+   to asking for the **inverter serial number** shown in the Hanchu app or web
+   console. The serial is validated against the inverter status API before the
+   entry is created. Battery packs are still discovered automatically from the
+   station details; their serial numbers do not need to be entered manually.
 
 Your email address and password are stored with the integration so it can sign
 in again by itself if the Hanchu cloud rejects its session (see
