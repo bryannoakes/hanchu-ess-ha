@@ -19,6 +19,8 @@ from custom_components.hanchuess.battery import (
 )
 from custom_components.hanchuess.sensor import (
     SENSORS,
+    LOAD_POWER_EPS,
+    _config_for_model,
     HanchueSensor,
     _parse_energy_menu,
 )
@@ -186,7 +188,7 @@ def test_load_power_uses_combined_eps_load_with_explicit_unit():
     # HESS-HY-S-12K-S can report loadPwr=0 while loadEpsPwr carries the actual
     # backed-house load. Use loadEpsPwr and its explicit unit so the live power
     # balance matches battery + grid input.
-    s = _make_sensor(SENSORS["load_power"], 903.3, unit="W")
+    s = _make_sensor(LOAD_POWER_EPS, 903.3, unit="W")
     assert s.native_value == 903.3
 
 
@@ -194,14 +196,14 @@ def test_load_power_falls_back_to_load_pwr_when_eps_field_absent():
     # Responses without loadEpsPwr keep the raw watts field.
     coordinator = MagicMock()
     coordinator.data = {"loadPwr": 687.3}
-    s = HanchueSensor(coordinator, _FakeEntry(), "load_power", SENSORS["load_power"])
+    s = HanchueSensor(coordinator, _FakeEntry(), "load_power", LOAD_POWER_EPS)
     assert s.native_value == 687.3
 
 
 def test_load_power_prefers_eps_field_over_zero_load_pwr():
     coordinator = MagicMock()
     coordinator.data = {"loadPwr": 0.0, "loadEpsPwr": 2.02, "loadEpsPwrUnit": "kW"}
-    s = HanchueSensor(coordinator, _FakeEntry(), "load_power", SENSORS["load_power"])
+    s = HanchueSensor(coordinator, _FakeEntry(), "load_power", LOAD_POWER_EPS)
     assert s.native_value == 2020.0
 
 
@@ -209,14 +211,14 @@ def test_load_power_never_hides_a_load_behind_a_zero_eps_field():
     # If loadEpsPwr reads 0 but loadPwr reports a load, show the load.
     coordinator = MagicMock()
     coordinator.data = {"loadPwr": 450.0, "loadEpsPwr": 0.0, "loadEpsPwrUnit": "kW"}
-    s = HanchueSensor(coordinator, _FakeEntry(), "load_power", SENSORS["load_power"])
+    s = HanchueSensor(coordinator, _FakeEntry(), "load_power", LOAD_POWER_EPS)
     assert s.native_value == 450.0
 
 
 def test_load_power_both_zero_reads_zero():
     coordinator = MagicMock()
     coordinator.data = {"loadPwr": 0.0, "loadEpsPwr": 0.0, "loadEpsPwrUnit": "kW"}
-    s = HanchueSensor(coordinator, _FakeEntry(), "load_power", SENSORS["load_power"])
+    s = HanchueSensor(coordinator, _FakeEntry(), "load_power", LOAD_POWER_EPS)
     assert s.native_value == 0
 
 
@@ -778,19 +780,29 @@ def test_pending_sensor_unique_id():
 def test_load_power_fallback_value_is_numeric_when_the_field_is_a_string():
     coordinator = MagicMock()
     coordinator.data = {"loadPwr": "450"}
-    s = HanchueSensor(coordinator, _FakeEntry(), "load_power", SENSORS["load_power"])
+    s = HanchueSensor(coordinator, _FakeEntry(), "load_power", LOAD_POWER_EPS)
     assert s.native_value == 450.0
 
 
 def test_load_power_zero_rule_returns_numeric_for_a_string_legacy_value():
     coordinator = MagicMock()
     coordinator.data = {"loadPwr": "450", "loadEpsPwr": 0.0, "loadEpsPwrUnit": "kW"}
-    s = HanchueSensor(coordinator, _FakeEntry(), "load_power", SENSORS["load_power"])
+    s = HanchueSensor(coordinator, _FakeEntry(), "load_power", LOAD_POWER_EPS)
     assert s.native_value == 450.0
 
 
 def test_load_power_non_numeric_fallback_is_none():
     coordinator = MagicMock()
     coordinator.data = {"loadPwr": "n/a"}
-    s = HanchueSensor(coordinator, _FakeEntry(), "load_power", SENSORS["load_power"])
+    s = HanchueSensor(coordinator, _FakeEntry(), "load_power", LOAD_POWER_EPS)
     assert s.native_value is None
+
+
+def test_load_power_eps_mapping_is_model_29_only():
+    from types import SimpleNamespace
+
+    assert SENSORS["load_power"]["key"] == "loadPwr"
+    assert _config_for_model("load_power", SENSORS["load_power"], SimpleNamespace(code=29)) is LOAD_POWER_EPS
+    for model in (None, SimpleNamespace(code=2), SimpleNamespace(code=4)):
+        assert _config_for_model("load_power", SENSORS["load_power"], model) is SENSORS["load_power"]
+    assert _config_for_model("pv_power", {"x": 1}, SimpleNamespace(code=29)) == {"x": 1}

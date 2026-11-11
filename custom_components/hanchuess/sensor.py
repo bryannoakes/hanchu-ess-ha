@@ -115,15 +115,11 @@ SENSORS = {
         "derive_mode": "negative_as_positive",
     },
     "load_power": {
-        "key": "loadEpsPwr",
+        "key": "loadPwr",
         "device_class": SensorDeviceClass.POWER,
         "state_class": SensorStateClass.MEASUREMENT,
         "unit": UnitOfPower.WATT,
         "icon": "mdi:home-lightning-bolt",
-        "auto_watt": True,
-        "unit_key": "loadEpsPwrUnit",
-        # Older/other responses carry the same aggregate as loadPwr (always W).
-        "fallback_key": "loadPwr",
     },
     "dg_power": {
         "key": "dgPAcTotal",
@@ -432,6 +428,27 @@ def _battery_temperature_count(battery_data: dict) -> int:
         return 4
 
 
+# HESS-HY-S-12K-S (devModel 29) reports the backed-up house load in loadEpsPwr
+# (with an explicit unit) while loadPwr stays 0. Other models keep loadPwr: it
+# is not known whether loadEpsPwr is the same quantity there.
+LOAD_POWER_EPS_MODELS = (29,)
+LOAD_POWER_EPS = {
+    **SENSORS["load_power"],
+    "key": "loadEpsPwr",
+    "auto_watt": True,
+    "unit_key": "loadEpsPwrUnit",
+    # Never hide a load behind a zero (or absent) loadEpsPwr.
+    "fallback_key": "loadPwr",
+}
+
+
+def _config_for_model(sensor_key, config, model):
+    """Return the sensor config to use for this inverter model."""
+    if sensor_key == "load_power" and getattr(model, "code", None) in LOAD_POWER_EPS_MODELS:
+        return LOAD_POWER_EPS
+    return config
+
+
 async def async_setup_entry(
     hass: HomeAssistant, entry: HanchuessConfigEntry, async_add_entities: AddEntitiesCallback
 ):
@@ -442,11 +459,13 @@ async def async_setup_entry(
     entities = []
     entities.append(DeviceStatusSensor(realtime, entry))
     entities.append(InverterStatusSensor(realtime, entry))
+    model = getattr(data, "inverter_model", None)
     for sensor_key, config in SENSORS.items():
         cond_key = config.get("condition_key")
         if cond_key:
             if realtime.data.get(cond_key) != config.get("condition_value"):
                 continue
+        config = _config_for_model(sensor_key, config, model)
         entities.append(HanchueSensor(realtime, entry, sensor_key, config))
     for sensor_key, config in STATISTICS_SENSORS.items():
         cond_key = config.get("condition_key")
