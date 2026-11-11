@@ -1,13 +1,17 @@
-"""Read-only HESS-HY-S-12K-S platform settings schema.
+"""HESS-HY-S-12K-S (model 29) platform settings schema and write allow-list.
 
 The 48 V 12K-S exposes a different settings model from the generic HA iotGet
 schema used by older Hanchu inverters.  The keys below come from the model-29
 HA menu and were validated against /gateway/platform/deviceNew/iotGet.
 
-Writes are intentionally not implemented here.  The platform values are exposed
-read-only until the model-specific write semantics have been verified safely.
+Only the keys in ``WRITABLE_SETTINGS`` can be written, and every value goes
+through ``validate_setting_write`` first.  Options that would allow grid export
+are refused unless the user opted in (see ``GRID_EXPORT_REFUSED``).
 """
 from __future__ import annotations
+
+import math
+import re
 
 from homeassistant.const import PERCENTAGE, UnitOfElectricPotential, UnitOfPower
 
@@ -257,9 +261,12 @@ def _to_number(key: str, value) -> float:
     if isinstance(value, bool):
         return float(value)
     try:
-        return float(value)
-    except (TypeError, ValueError):
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
         raise SettingWriteError(f"{key}: {value!r} is not a number") from None
+    if not math.isfinite(number):
+        raise SettingWriteError(f"{key}: {value!r} is not a finite number")
+    return number
 
 
 def validate_setting_write(key: str, value, allow_export: bool = False):
@@ -273,7 +280,7 @@ def validate_setting_write(key: str, value, allow_export: bool = False):
     kind = spec["kind"]
     if kind == "hhmm":
         text = str(value).strip().replace(":", "")
-        if len(text) != 4 or not text.isdigit():
+        if len(text) != 4 or not (text.isascii() and text.isdigit()):
             raise SettingWriteError(f"{key}: {value!r} is not a time (HHMM)")
         if int(text[:2]) > 23 or int(text[2:]) > 59:
             raise SettingWriteError(f"{key}: {value!r} is not a valid time")
@@ -306,3 +313,40 @@ def validate_setting_write(key: str, value, allow_export: bool = False):
             f"{key}: {number} outside allowed range {spec['min']}-{spec['max']}"
         )
     return number
+
+
+_SCHEDULE_ENABLE = {
+    "timedChargeEnable": re.compile(
+        r"^(startChgTime|endChgTime)\d$"
+        r"|^timePeriod\d(StopChargingSoc|StopChargingV|MaxChgPwr|StopChargingEnergySource)$"
+    ),
+    "timedDischargeEnable": re.compile(
+        r"^(startDischgTime|endDischgTime)\d$"
+        r"|^timePeriod\d(StopDischargingSoc|StopDischargingV|MaxDisChgPwr)$"
+    ),
+}
+
+
+def plan_write_order(snapshot: dict) -> list[tuple[str, list[str]]]:
+    """Order a staged snapshot for writing: [(key, keys that must have applied first)].
+
+    A timed schedule must never run on a half-applied parameter set, so:
+    schedule disables go first; ordinary keys (including schedule parameters)
+    next; schedule enables last, each depending on every staged parameter of
+    that schedule.  An enable whose prerequisites failed is not written.
+    """
+    disables: list[tuple[str, list[str]]] = []
+    enables: list[tuple[str, list[str]]] = []
+    params = [k for k in snapshot if k not in _SCHEDULE_ENABLE]
+    for key, pattern in _SCHEDULE_ENABLE.items():
+        if key not in snapshot:
+            continue
+        try:
+            turning_on = float(snapshot[key]) == 1
+        except (TypeError, ValueError, OverflowError):
+            turning_on = False
+        if turning_on:
+            enables.append((key, [k for k in params if pattern.match(k)]))
+        else:
+            disables.append((key, []))
+    return disables + [(k, []) for k in params] + enables

@@ -37,6 +37,11 @@ later versions are tracked here going forward.
   Hybrid grid mode (`workMode`) is writable for options 2 and 3 only; On Grid (1) is refused because it allows export.
 - HESS-HY-S-12K-S: settings reads and writes refresh the token once and retry on a
   401 instead of failing the write; a second failure is reported as a normal write error.
+- HESS-HY-S-12K-S writes: the whole staged set is validated first and written in a safe
+  order (schedule disables first, enables last and only if the schedule's parameters were
+  confirmed); concurrent Write Settings calls are serialised; a value staged while an older
+  one is being written is kept; read-back confirmation is exact; Read Settings keeps pending
+  edits if the read fails; non-finite numbers are rejected cleanly.
 - Documentation: manual extraction (`docs/hess-hy-s-12k-s-manual.md`) and the
   model-29 write matrix (`docs/model29-write-plan.md`).
 

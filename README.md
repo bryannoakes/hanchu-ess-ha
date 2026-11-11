@@ -45,7 +45,8 @@ published by Hanchu (Guoxia Technology, the manufacturer) which has had few upda
 Changes to all control entities above are **staged locally** and only sent to the
 device when you press **Write Settings** (or call the `hanchuess.write_settings`
 service). This batches all pending changes into a single `iotSet` API call,
-avoiding Hanchu's rate limiter.
+avoiding Hanchu's rate limiter. (The HESS-HY-S-12K-S is the exception: it writes
+one key at a time and confirms each by reading it back; see its section below.)
 
 - **Read Settings** button — calls `iotGet` for all control keys and refreshes
   every control entity's state from the device. Also runs automatically at startup.
@@ -91,7 +92,8 @@ In addition to the automatable entities above, this integration exposes two HA s
 
 ### `hanchuess.write_settings`
 
-Flush all staged control-entity changes to the device in a single `iotSet` call.
+Flush all staged control-entity changes to the device in a single `iotSet` call
+(one confirmed write per key on the HESS-HY-S-12K-S).
 Useful in automations that set time slots or other controls and need to ensure the
 device receives the update without the user pressing the Write Settings button.
 

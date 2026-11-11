@@ -874,3 +874,34 @@ def test_read_only_setting_sensor_category_is_valid_for_sensors():
     from custom_components.hanchuess.sensor import HanchuessReadOnlySettingSensor
 
     assert HanchuessReadOnlySettingSensor._attr_entity_category is not EntityCategory.CONFIG
+
+
+async def test_12k_read_settings_failure_keeps_pending_edits():
+    entry = _FakeEntryWithStaging()
+    entry.runtime_data.inverter_model = SimpleNamespace(code=29)
+    entry.runtime_data.realtime = SimpleNamespace(client=AsyncMock())
+    settings = MagicMock()
+    settings.async_refresh = AsyncMock()
+    settings.last_update_success = False  # cloud read failed
+    entry.runtime_data.settings = settings
+    entry.runtime_data.staging.stage("chgSocLmt", 90)
+
+    await HanchuessReadSettingsButton(MagicMock(), entry).async_press()
+
+    assert entry.runtime_data.staging.snapshot() == {"chgSocLmt": 90}
+
+
+async def test_12k_read_settings_success_discards_pending_edits():
+    entry = _FakeEntryWithStaging()
+    entry.runtime_data.inverter_model = SimpleNamespace(code=29)
+    entry.runtime_data.realtime = SimpleNamespace(client=AsyncMock())
+    settings = MagicMock()
+    settings.async_refresh = AsyncMock()
+    settings.last_update_success = True
+    settings.data = {"chgSocLmt": "95"}
+    entry.runtime_data.settings = settings
+    entry.runtime_data.staging.stage("chgSocLmt", 90)
+
+    await HanchuessReadSettingsButton(MagicMock(), entry).async_press()
+
+    assert entry.runtime_data.staging.snapshot() == {}

@@ -104,12 +104,13 @@ class HanchuessReadSettingsButton(ButtonEntity):
                         "[HANCHUESS] Read Settings has no model-29 settings coordinator"
                     )
                     return
-                # Discard pending edits: the device values replace them.
-                self._entry.runtime_data.staging.clear()
                 await coordinator.async_refresh()
                 if not coordinator.last_update_success:
+                    # Keep pending edits: nothing replaced them.
                     _LOGGER.warning("[HANCHUESS] Read Settings refresh failed")
                     return
+                # Discard pending edits only now: the device values replace them.
+                self._entry.runtime_data.staging.clear()
                 _LOGGER.info(
                     "[HANCHUESS] Read Settings refreshed %d model-29 values at %s",
                     len(coordinator.data or {}),

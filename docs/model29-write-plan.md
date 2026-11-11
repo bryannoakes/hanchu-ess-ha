@@ -43,11 +43,18 @@ Slot 2/3 entities are disabled by default in the entity registry. Every live tes
 
 1. Entities validate the value and stage it in the shared `SettingsStagingBuffer` (the same layer the other models
    use). The entity shows the pending value and a `pending_write` attribute; the cloud is not touched yet.
-2. Write Settings / `hanchuess.write_settings` calls `HanchuessSettingsCoordinator.async_write_staged`. For each staged
-   key: validate again, `iotSet`, then poll `iotGet` (up to 6 x 3 s) until the value matches.
-3. Confirmed keys leave staging. Unconfirmed or rejected keys stay staged and a persistent notification lists them.
-4. On a 401 the token is refreshed once and the call retried; a second failure surfaces as a normal write error.
-5. Read Settings discards staged edits and re-reads, as it does on the other models.
+2. Write Settings / `hanchuess.write_settings` calls `HanchuessSettingsCoordinator.async_write_staged` under a lock, so
+   two flushes never overlap. The whole snapshot is validated first. Keys are then written in a safe order
+   (`plan_write_order`): schedule disables first, then ordinary keys and schedule parameters, then schedule enables last.
+   An enable (`timedChargeEnable` / `timedDischargeEnable` = 1) is not written if any staged parameter of that schedule
+   was invalid or failed to confirm.
+3. For each key: `iotSet`, then poll `iotGet` (up to 6 x 3 s) until the value matches exactly (`"97.9"` does not confirm
+   97). Confirmed keys leave staging unless the user staged a newer value meanwhile. Unconfirmed or rejected keys stay
+   staged and a persistent notification lists them.
+4. On a 401 the token is refreshed once and the call retried; if the retry is also rejected it surfaces as an
+   authentication error (reads) or a write error (writes), without a second refresh.
+5. Read Settings re-reads and, only if the read succeeded, discards staged edits (same as the other models). A failed
+   read keeps them.
 
 ## Grid export is an opt-in
 
@@ -61,7 +68,7 @@ default off). The gate is in the validator, not only the UI. With the option on,
 Upstream samples for `devModel` 2 and 4 (June 2026) show `loadPwr` (W) equal to `loadEpsPwr` (kW) x 1000. On model 29
 (Nov 2026) `loadPwr` is 0 while `loadEpsPwr` carries the load, and PV + grid = load + battery closes. It cannot be told
 from the data whether that is model-specific or a later Hanchu change, so the sensor prefers `loadEpsPwr` (with its unit)
-and falls back to `loadPwr`.
+and falls back to `loadPwr` when `loadEpsPwr` is absent, and also when it reads zero while `loadPwr` reports a load.
 
 ## Not covered
 

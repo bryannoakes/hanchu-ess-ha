@@ -409,3 +409,196 @@ async def test_flush_writes_each_key_and_clears_confirmed_only():
     assert list(errors) == ["gridCharging"] and "did not confirm" in errors["gridCharging"]
     assert staging.snapshot() == {"gridCharging": 1}
     assert client.async_platform_iot_set.await_count == 2
+
+
+# --- independent-review regressions -------------------------------------------------
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), "-inf", "nan", "1e999"])
+@pytest.mark.parametrize(
+    "key", ["chgSocLmt", "workMode", "gridCharging", "timePeriod1StopChargingV"]
+)
+def test_validator_rejects_non_finite_numbers_cleanly(key, bad):
+    with pytest.raises(SettingWriteError):
+        validate_setting_write(key, bad)
+
+
+@pytest.mark.parametrize("bad", ["²²²²", "０３００", "03:0٣"])
+def test_validator_rejects_non_ascii_digit_times(bad):
+    with pytest.raises(SettingWriteError):
+        validate_setting_write("startChgTime1", bad)
+
+
+@pytest.mark.parametrize(
+    ("raw", "sent", "ok"),
+    [
+        ("97", 97, True),
+        ("97.0", 97, True),
+        (97, 97, True),
+        ("97.9", 97, False),
+        ("2.9", 2, False),
+        ("nan", 97, False),
+        ("inf", 97, False),
+        (None, 97, False),
+        ("57.5", 57.5, True),
+        ("57.4", 57.5, False),
+        ("0300", "0300", True),
+    ],
+)
+def test_read_back_comparison_is_exact(raw, sent, ok):
+    from custom_components.hanchuess.coordinator import _same
+
+    assert _same(raw, sent) is ok
+
+
+def test_plan_write_order_puts_disable_first_enable_last():
+    from custom_components.hanchuess.settings_12k import plan_write_order
+
+    plan = plan_write_order(
+        {
+            "timedChargeEnable": 1,
+            "startChgTime1": "0300",
+            "chgSocLmt": 97,
+            "timedDischargeEnable": 0,
+            "timePeriod1MaxChgPwr": 4000,
+            "timePeriod1StopDischargingSoc": 20,
+        }
+    )
+    keys = [k for k, _ in plan]
+    assert keys[0] == "timedDischargeEnable"
+    assert keys[-1] == "timedChargeEnable"
+    deps = dict(plan)["timedChargeEnable"]
+    assert set(deps) == {"startChgTime1", "timePeriod1MaxChgPwr"}  # charge params only
+
+
+def _fake_device(client, fail=()):
+    device, order = {}, []
+
+    async def iot_set(sn, dev_type, value):
+        ((key, val),) = value.items()
+        order.append(key)
+        if key not in fail:
+            device[key] = val
+        return {"success": True}
+
+    async def iot_get(sn, dev_type, keys, **kwargs):
+        return {k: str(device[k]) for k in keys if k in device}
+
+    client.async_platform_iot_set = iot_set
+    client.async_platform_iot_get = iot_get
+    return device, order
+
+
+async def test_flush_writes_schedule_parameters_before_enabling():
+    from custom_components.hanchuess.staging import SettingsStagingBuffer
+
+    coord, client = _coordinator({"success": True}, [])
+    _, order = _fake_device(client)
+    staging = SettingsStagingBuffer()
+    staging.stage("timedChargeEnable", 1)  # staged first on purpose
+    staging.stage("startChgTime1", "0300")
+    staging.stage("timedDischargeEnable", 0)
+    assert await coord.async_write_staged(staging) == {}
+    assert order == ["timedDischargeEnable", "startChgTime1", "timedChargeEnable"]
+
+
+async def test_flush_does_not_enable_schedule_when_a_parameter_fails():
+    from unittest.mock import patch
+
+    from custom_components.hanchuess.staging import SettingsStagingBuffer
+
+    coord, client = _coordinator({"success": True}, [])
+    _, order = _fake_device(client, fail={"startChgTime1"})
+    staging = SettingsStagingBuffer()
+    staging.stage("startChgTime1", "0300")
+    staging.stage("timePeriod1MaxChgPwr", 4000)
+    staging.stage("timedChargeEnable", 1)
+    with patch("custom_components.hanchuess.coordinator.asyncio.sleep", new=AsyncMock()):
+        errors = await coord.async_write_staged(staging)
+    assert "timedChargeEnable" not in order
+    assert "not written" in errors["timedChargeEnable"]
+    assert "did not confirm" in errors["startChgTime1"]
+    assert set(staging.snapshot()) == {"startChgTime1", "timedChargeEnable"}
+
+
+async def test_flush_validates_everything_and_blocks_enable_on_invalid_parameter():
+    from custom_components.hanchuess.staging import SettingsStagingBuffer
+
+    coord, client = _coordinator({"success": True}, [])
+    _, order = _fake_device(client)
+    staging = SettingsStagingBuffer()
+    staging.stage("timePeriod1StopChargingSoc", 500)  # out of range
+    staging.stage("timedChargeEnable", 1)
+    errors = await coord.async_write_staged(staging)
+    assert order == []
+    assert set(errors) == {"timePeriod1StopChargingSoc", "timedChargeEnable"}
+
+
+async def test_flush_keeps_a_newer_edit_staged_during_the_write():
+    from custom_components.hanchuess.staging import SettingsStagingBuffer
+
+    coord, client = _coordinator({"success": True}, [])
+    device, _ = _fake_device(client)
+    staging = SettingsStagingBuffer()
+    staging.stage("chgSocLmt", 97)
+    inner = client.async_platform_iot_set
+
+    async def set_then_user_edits(sn, dev_type, value):
+        result = await inner(sn, dev_type, value)
+        staging.stage("chgSocLmt", 90)  # user changes it while the write is in flight
+        return result
+
+    client.async_platform_iot_set = set_then_user_edits
+    assert await coord.async_write_staged(staging) == {}
+    assert device["chgSocLmt"] == 97
+    assert staging.snapshot() == {"chgSocLmt": 90}
+
+
+async def test_concurrent_flushes_are_serialised():
+    import asyncio
+
+    from custom_components.hanchuess.staging import SettingsStagingBuffer
+
+    coord, client = _coordinator({"success": True}, [])
+    _fake_device(client)
+    inner, state = client.async_platform_iot_set, {"now": 0, "max": 0}
+
+    async def tracked(sn, dev_type, value):
+        state["now"] += 1
+        state["max"] = max(state["max"], state["now"])
+        await asyncio.sleep(0)
+        try:
+            return await inner(sn, dev_type, value)
+        finally:
+            state["now"] -= 1
+
+    client.async_platform_iot_set = tracked
+    staging = SettingsStagingBuffer()
+    staging.stage("chgSocLmt", 97)
+    staging.stage("gridCharging", 1)
+    await asyncio.gather(coord.async_write_staged(staging), coord.async_write_staged(staging))
+    assert state["max"] == 1
+
+
+async def test_second_401_on_write_is_reported_without_a_second_refresh():
+    coord, client = _coordinator({"success": False, "msg": "token_expired"}, [])
+    client.async_platform_iot_set = AsyncMock(
+        return_value={"success": False, "msg": "token_expired"}
+    )
+    _with_refresh(coord, client)
+    with pytest.raises(HomeAssistantError, match="token_expired"):
+        await coord.async_write_setting("chgSocLmt", 97, delay=0)
+    assert client.async_platform_iot_set.await_count == 2
+    client.async_refresh_token.assert_awaited_once_with(force=True)
+
+
+async def test_second_401_on_read_back_is_an_auth_error_not_a_readback_failure():
+    from custom_components.hanchuess.api import TokenExpired
+
+    coord, client = _coordinator({"success": True}, [TokenExpired(), TokenExpired()])
+    _with_refresh(coord, client)
+    with pytest.raises(HomeAssistantError) as err:
+        await coord.async_write_setting("chgSocLmt", 97, delay=0)
+    assert "did not confirm" not in str(err.value)
+    client.async_refresh_token.assert_awaited_once_with(force=True)
+    assert client.async_platform_iot_get.await_count == 2

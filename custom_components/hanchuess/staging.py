@@ -60,6 +60,18 @@ class SettingsStagingBuffer:
         if removed:
             self._notify()
 
+    def discard_if_value(self, key: str, value: Any) -> bool:
+        """Remove ``key`` only if it is still staged with ``value``.
+
+        A flush uses this so a newer edit staged while the older value was being
+        written is kept.  Returns True if the key was removed.
+        """
+        if key in self.pending and self.pending[key] == value:
+            del self.pending[key]
+            self._notify()
+            return True
+        return False
+
     # ------------------------------------------------------------------
     # Read-only helpers
     # ------------------------------------------------------------------
