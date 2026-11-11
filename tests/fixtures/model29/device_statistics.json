@@ -1,0 +1,16 @@
+{
+  "code": 200,
+  "data": {
+    "batCharge": 20.5,
+    "batDisCharge": 3.4,
+    "date": "00:00",
+    "dgEp": 0.0,
+    "gridExport": 0.0,
+    "gridImport": 5.0,
+    "hasDg": 0,
+    "load": 18.9,
+    "pv": 31.0
+  },
+  "success": true,
+  "traceId": "test-trace-id"
+}
