@@ -102,7 +102,12 @@ class HanchuessApiClient:
                         url, headers=headers, **request_kwargs
                     ) as response:
                         result = await response.json(content_type=None)
-                        _LOGGER.debug("[HANCHUESS] response: %s status=%s body=%s", path, response.status, str(result)[:500])
+                        _LOGGER.debug(
+                            "[HANCHUESS] response: %s status=%s code=%s",
+                            path,
+                            response.status,
+                            result.get("code") if isinstance(result, dict) else None,
+                        )
                         if response.status == 401:
                             return {"success": False, "code": 401}
                         if response.status == 200:
