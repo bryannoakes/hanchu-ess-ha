@@ -45,7 +45,8 @@ published by Hanchu (Guoxia Technology, the manufacturer) which has had few upda
 Changes to all control entities above are **staged locally** and only sent to the
 device when you press **Write Settings** (or call the `hanchuess.write_settings`
 service). This batches all pending changes into a single `iotSet` API call,
-avoiding Hanchu's rate limiter.
+avoiding Hanchu's rate limiter. (The HESS-HY-S-12K-S is the exception: it writes
+one key at a time and confirms each by reading it back; see its section below.)
 
 - **Read Settings** button — calls `iotGet` for all control keys and refreshes
   every control entity's state from the device. Also runs automatically at startup.
@@ -91,7 +92,8 @@ In addition to the automatable entities above, this integration exposes two HA s
 
 ### `hanchuess.write_settings`
 
-Flush all staged control-entity changes to the device in a single `iotSet` call.
+Flush all staged control-entity changes to the device in a single `iotSet` call
+(one confirmed write per key on the HESS-HY-S-12K-S).
 Useful in automations that set time slots or other controls and need to ensure the
 device receives the update without the user pressing the Write Settings button.
 
@@ -205,19 +207,49 @@ From 2026.11, HACS is built into Home Assistant as the **Marketplace**. You must
 
 ## Configuration
 
-The setup flow only asks for your Hanchu app credentials — it then discovers your
-devices automatically:
+The setup flow normally discovers your inverters automatically:
 
 1. Enter your Hanchu app **email address** and **password**.
 2. The integration logs in and lists the inverters on your account. **Select the
    device(s)** you want to add. Each selected device is created as its own HA
-   device; no serial number needs to be entered by hand.
+   device.
+3. If Hanchu's device-list API returns no inverters, the integration falls back
+   to asking for the **inverter serial number** shown in the Hanchu app or web
+   console. The serial is validated against the inverter status API before the
+   entry is created. Battery packs are still discovered automatically from the
+   station details; their serial numbers do not need to be entered manually.
 
 Your email address and password are stored with the integration so it can sign
 in again by itself if the Hanchu cloud rejects its session (see
 [Re-authentication](#re-authentication)). Like most Home Assistant cloud
 integrations, they are kept in Home Assistant's own config storage, and they are
 redacted from diagnostics files.
+
+### HESS-HY-S-12K-S settings
+
+The HESS-HY-S-12K-S (model code 29) exposes a different settings schema from
+the generic Hanchu HA control API. On this model, `/app/ha/iotGet` can return
+code `100` / data `900001`, while the same HA-scoped token succeeds against
+the encrypted `/platform/deviceNew/iotGet` endpoint.
+
+For model 29 the integration therefore uses the platform settings schema. All
+values are exposed as diagnostic sensors, and a strict allow-list of settings is
+writable through dedicated entities (switch / select / number / time): grid,
+timed charge/discharge and generator enables, Battery and PV energy manage,
+Hybrid grid mode, and the three charge and discharge periods (start/end times,
+stop SOC, stop voltage, max power, charge energy source). Every write is
+validated, sent through the encrypted `iotSet` endpoint and **confirmed by
+reading the value back**; an unconfirmed write raises an error.
+
+Grid export is **off by default**: "Battery to grid sell", "First to grid" and
+Hybrid grid mode "On Grid" are not offered and are refused if requested. They
+can be made selectable (labelled "(grid export)") with the integration option
+**Allow grid export settings**, which only appears for this model. Enable it
+only if your network operator and local regulations permit export. Power on/off, restart, password, date/time and the other advanced
+settings are not writable. The generic Work Mode, Write Settings and Fast
+Charge/Discharge controls are not created for this model. Charge/discharge
+periods 2 and 3 are disabled by default in the entity registry. See
+`docs/model29-write-plan.md` for the full matrix.
 
 ### First-time setup
 
@@ -280,6 +312,14 @@ After initial setup, polling intervals and fast charge duration can be adjusted 
 The Hanchu iESS works with [Predbat](https://github.com/springfall2008/batpred) — a Home Assistant battery prediction and optimisation add-on — via Predbat's generic Service API.
 
 Full setup instructions, including the bridge script, helper configuration, `apps.yaml` template, and `configuration.yaml` additions, are documented in the [Predbat inverter setup docs](https://springfall2008.github.io/batpred/inverter-setup/#hanchu-iess).
+
+## Inverter Status Sensor
+
+Want a single sensor showing whether the battery is fast charging, running a
+scheduled charge or discharge, charging from solar, or idle? See the
+[inverter status sensor recipe](docs/inverter-status.md). It's built from
+Home Assistant helpers, template sensors and one automation, so you can adapt
+it to your setup. Contributed by [@lancedfr](https://github.com/lancedfr).
 
 ## Development
 

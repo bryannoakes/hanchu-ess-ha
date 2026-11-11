@@ -9,6 +9,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .models import inverter_model_name
 from .const import DOMAIN
+from .settings_12k import is_12k_s
+from .settings_12k_entities import build_entities
 from . import HanchuessConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
@@ -26,6 +28,13 @@ WORK_MODES_REVERSE = {v: k for k, v in WORK_MODES.items()}
 async def async_setup_entry(
     hass: HomeAssistant, entry: HanchuessConfigEntry, async_add_entities: AddEntitiesCallback
 ):
+    if is_12k_s(entry):
+        _LOGGER.info("[HANCHUESS] Skipping generic Work Mode control for HESS-HY-S-12K-S")
+        settings = entry.runtime_data.settings
+        if settings is not None:
+            async_add_entities(build_entities(entry, settings, ("enum",)))
+        return
+
     data = entry.runtime_data
     startup_values = data.startup_values
     async_add_entities([WorkModeSelect(entry, startup_values)])

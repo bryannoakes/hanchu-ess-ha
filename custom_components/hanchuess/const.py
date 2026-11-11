@@ -15,6 +15,7 @@ CONF_REALTIME_INTERVAL = "realtime_interval"
 CONF_STATISTICS_INTERVAL = "statistics_interval"
 CONF_BATTERY_INTERVAL = "battery_interval"
 CONF_FAST_CHARGE_DURATION = "fast_charge_duration"
+CONF_ALLOW_GRID_EXPORT = "allow_grid_export"
 DEFAULT_REALTIME_INTERVAL = 60        # seconds
 DEFAULT_STATISTICS_INTERVAL = 300     # seconds
 DEFAULT_BATTERY_INTERVAL = 600        # seconds

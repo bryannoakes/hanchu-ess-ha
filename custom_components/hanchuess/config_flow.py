@@ -6,6 +6,7 @@ import homeassistant.helpers.config_validation as cv
 from homeassistant import config_entries
 from homeassistant.config_entries import OptionsFlowWithReload
 from homeassistant.core import callback
+from .settings_12k import is_12k_s
 from .const import (
     DOMAIN,
     BASE_URL,
@@ -14,6 +15,7 @@ from .const import (
     CONF_STATISTICS_INTERVAL,
     CONF_BATTERY_INTERVAL,
     CONF_FAST_CHARGE_DURATION,
+    CONF_ALLOW_GRID_EXPORT,
     DEFAULT_REALTIME_INTERVAL,
     DEFAULT_STATISTICS_INTERVAL,
     DEFAULT_BATTERY_INTERVAL,
@@ -51,8 +53,7 @@ class HanchuessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._account = shared_client._account
             self._password = shared_client._password
             self._devices = await shared_client.async_get_devices()
-            if self._devices:
-                return await self.async_step_select_device()
+            return await self._after_device_list()
 
         errors = {}
         if user_input is not None:
@@ -66,12 +67,13 @@ class HanchuessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._account = user_input["account"]
                 self._password = user_input["password"]
                 self._devices = await client.async_get_devices()
-                if self._devices:
-                    return await self.async_step_select_device()
-                errors["base"] = "no_devices"
+                return await self._after_device_list()
             else:
                 errors["base"] = "auth_failed"
 
+        return self._show_user_form(errors)
+
+    def _show_user_form(self, errors: dict):
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema({
@@ -81,11 +83,83 @@ class HanchuessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
+    async def _after_device_list(self):
+        """Pick the next step after getDeviceList.
+
+        An empty successful list means the account has no discoverable devices
+        (manual serial entry).  A failed request must not look like that: show
+        the login form with a connection error instead.
+        """
+        if self._devices:
+            return await self.async_step_select_device()
+        if getattr(self._client, "devices_query_failed", False) is True:
+            return self._show_user_form({"base": "cannot_connect"})
+        return await self.async_step_manual_serial()
+
     def _credentials(self) -> dict:
         """Credentials to store with the entry, so a rejected refresh can re-login."""
         if self._account and self._password:
             return {"account": self._account, "password": self._password}
         return {}
+
+    async def async_step_manual_serial(self, user_input=None):
+        """Fallback step when Hanchu device discovery returns no inverters."""
+        errors = {}
+        schema = vol.Schema({
+            vol.Required("serial_number"): str,
+        })
+
+        if user_input is not None:
+            inverter_serial_number = user_input["serial_number"].strip()
+            client = self._client or HanchuessApiClient(
+                self.hass, BASE_URL, token=self._token
+            )
+            self._client = client
+
+            language = self.hass.config.language or "en"
+            device_status = await client.async_get_device_status(
+                inverter_serial_number, language
+            )
+            station_id = (
+                device_status.get("stationId") if device_status else None
+            )
+            if not station_id:
+                errors["base"] = "serial_lookup_failed"
+            else:
+                station_detail = await client.async_get_station_detail(
+                    station_id, language
+                )
+                if not station_detail or station_detail.get("success") is not True:
+                    errors["base"] = "battery_lookup_failed"
+                    return self.async_show_form(
+                        step_id="manual_serial",
+                        data_schema=schema,
+                        errors=errors,
+                        description_placeholders={"console_url": WEB_CONSOLE_URL},
+                    )
+
+                await self.async_set_unique_id(inverter_serial_number)
+                self._abort_if_unique_id_configured()
+
+                battery_serials = extract_battery_serials(station_detail)
+                return self.async_create_entry(
+                    title=f"Hanchuess {inverter_serial_number}",
+                    data={
+                        "sn": inverter_serial_number,
+                        "dev_type": "2",
+                        "token": self._token,
+                        **self._credentials(),
+                        "stationId": station_id,
+                        "battery_serials": battery_serials,
+                        "pending_devices": [],
+                    },
+                )
+
+        return self.async_show_form(
+            step_id="manual_serial",
+            data_schema=schema,
+            errors=errors,
+        )
 
     async def async_step_select_device(self, user_input=None):
         """Step 2: Select devices (multi-select)."""
@@ -279,5 +353,13 @@ class HanchuessOptionsFlow(OptionsFlowWithReload):
                 default=options.get(CONF_FAST_CHARGE_DURATION, DEFAULT_FAST_CHARGE_DURATION),
             ): vol.All(vol.Coerce(int), vol.Range(min=5, max=240)),
         })
+        if is_12k_s(self.config_entry):
+            # Model 29 only: opt in to option values that allow grid export.
+            data_schema = data_schema.extend({
+                vol.Required(
+                    CONF_ALLOW_GRID_EXPORT,
+                    default=options.get(CONF_ALLOW_GRID_EXPORT, False),
+                ): bool,
+            })
 
         return self.async_show_form(step_id="init", data_schema=data_schema)

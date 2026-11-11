@@ -54,6 +54,7 @@ def _patched_client(token="tok", devices=None):
     instance.async_get_station_detail = AsyncMock(
         return_value={
             "code": 200,
+            "success": True,
             "data": {
                 "bmsList": [
                     {"sn": "B007EN5811054"},
@@ -126,7 +127,7 @@ async def test_user_flow_auth_failed(hass: HomeAssistant):
         patcher.stop()
 
 
-async def test_user_flow_no_devices(hass: HomeAssistant):
+async def test_user_flow_no_devices_offers_manual_serial(hass: HomeAssistant):
     patcher, _ = _patched_client(token="tok", devices=[])
     try:
         result = await hass.config_entries.flow.async_init(
@@ -136,7 +137,89 @@ async def test_user_flow_no_devices(hass: HomeAssistant):
             result["flow_id"], {"account": "a", "password": "p"}
         )
         assert result2["type"] == FlowResultType.FORM
-        assert result2["errors"] == {"base": "no_devices"}
+        assert result2["step_id"] == "manual_serial"
+        assert result2["errors"] == {}
+    finally:
+        patcher.stop()
+
+
+async def test_user_flow_failed_device_list_is_a_connection_error(hass: HomeAssistant):
+    # A failed getDeviceList must not look like "no devices": no manual serial form.
+    patcher, instance = _patched_client(token="tok", devices=[])
+    instance.devices_query_failed = True
+    try:
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
+        result2 = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"account": "a", "password": "p"}
+        )
+        assert result2["type"] == FlowResultType.FORM
+        assert result2["step_id"] == "user"
+        assert result2["errors"] == {"base": "cannot_connect"}
+    finally:
+        patcher.stop()
+
+
+async def test_manual_serial_flow_creates_entry_and_discovers_batteries(
+    hass: HomeAssistant,
+):
+    hass.config.language = "fr"
+    patcher, instance = _patched_client(token="tok", devices=[])
+    try:
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
+        result2 = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"account": "a", "password": "p"}
+        )
+        assert result2["step_id"] == "manual_serial"
+
+        with patch(
+            "custom_components.hanchuess.async_setup_entry", return_value=True
+        ):
+            result3 = await hass.config_entries.flow.async_configure(
+                result2["flow_id"], {"serial_number": " SN1 "}
+            )
+            await hass.async_block_till_done()
+
+        assert result3["type"] == FlowResultType.CREATE_ENTRY
+        assert result3["data"]["sn"] == "SN1"
+        assert result3["data"]["dev_type"] == "2"
+        assert result3["data"]["token"] == "tok"
+        assert result3["data"]["account"] == "a"
+        assert result3["data"]["password"] == "p"
+        assert result3["data"]["stationId"] == "ST2503268043IE"
+        assert result3["data"]["battery_serials"] == [
+            "B007EN5811054",
+            "B002MU4810030",
+        ]
+        assert result3["data"]["pending_devices"] == []
+        instance.async_get_device_status.assert_awaited_once_with("SN1", "fr")
+        instance.async_get_station_detail.assert_awaited_once_with(
+            "ST2503268043IE", "fr"
+        )
+    finally:
+        patcher.stop()
+
+
+async def test_manual_serial_rejects_unknown_inverter(hass: HomeAssistant):
+    patcher, instance = _patched_client(token="tok", devices=[])
+    instance.async_get_device_status = AsyncMock(return_value={})
+    try:
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
+        result2 = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"account": "a", "password": "p"}
+        )
+        result3 = await hass.config_entries.flow.async_configure(
+            result2["flow_id"], {"serial_number": "UNKNOWN"}
+        )
+        assert result3["type"] == FlowResultType.FORM
+        assert result3["step_id"] == "manual_serial"
+        assert result3["errors"] == {"base": "serial_lookup_failed"}
+        instance.async_get_station_detail.assert_not_awaited()
     finally:
         patcher.stop()
 
@@ -556,3 +639,56 @@ async def test_setup_entry_passes_stored_credentials_to_client(hass: HomeAssista
         assert await hanchuess.async_setup_entry(hass, entry) is True
 
     client.set_credentials.assert_called_once_with("a", "p")
+
+
+async def test_options_flow_offers_grid_export_only_for_model_29(hass: HomeAssistant):
+    from types import SimpleNamespace
+
+    entry = MockConfigEntry(
+        domain=DOMAIN, data={"sn": "SN1", "token": "tok"}, unique_id="SN1"
+    )
+    entry.add_to_hass(hass)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert "allow_grid_export" not in result["data_schema"].schema.keys().__str__()
+    hass.config_entries.options.async_abort(result["flow_id"])
+
+    entry.runtime_data = SimpleNamespace(inverter_model=SimpleNamespace(code=29))
+    with patch.object(hass.config_entries, "async_schedule_reload", MagicMock()):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        assert "allow_grid_export" in str(list(result["data_schema"].schema))
+        result2 = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            {
+                "realtime_interval": 60,
+                "statistics_interval": 600,
+                "battery_interval": 600,
+                "fast_charge_duration": 30,
+                "allow_grid_export": True,
+            },
+        )
+    assert result2["type"] == FlowResultType.CREATE_ENTRY
+    assert entry.options["allow_grid_export"] is True
+
+
+async def test_manual_serial_rejects_an_unsuccessful_station_detail_response(
+    hass: HomeAssistant,
+):
+    patcher, instance = _patched_client(token="tok", devices=[])
+    instance.async_get_station_detail = AsyncMock(
+        return_value={"success": False, "code": 403}
+    )
+    try:
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
+        result2 = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"account": "a", "password": "p"}
+        )
+        result3 = await hass.config_entries.flow.async_configure(
+            result2["flow_id"], {"serial_number": "SN1"}
+        )
+        assert result3["type"] == FlowResultType.FORM
+        assert result3["step_id"] == "manual_serial"
+        assert result3["errors"] == {"base": "battery_lookup_failed"}
+    finally:
+        patcher.stop()

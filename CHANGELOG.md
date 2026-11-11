@@ -10,6 +10,87 @@ later versions are tracked here going forward.
 
 ## [Unreleased]
 
+### Added
+- HESS-HY-S-12K-S/model 29 now reads its real platform settings through
+  encrypted `/platform/deviceNew/iotGet` using the existing HA-scoped token.
+  The model-specific values are exposed read-only because its control schema
+  differs materially from the generic HA settings API.
+- Generic settings and fast charge/discharge write controls are suppressed and
+  server-side write paths are blocked for model 29 during validation.
+
+- HESS-HY-S-12K-S: guarded write for one setting, Battery SOC Stop Charge Limit
+  (`chgSocLmt`, 50-100), via the native `/platform/deviceNew/iotSet` payload captured
+  from the iESS app. Strict allow-list; every other key (including all grid-sell/export
+  options, time slots and enums) is refused. Each write is confirmed by reading the
+  value back, and failures raise a visible error.
+
+- HESS-HY-S-12K-S: data-driven writable controls generated from one allow-list
+  (`WRITABLE_SETTINGS`): grid charging, timed charge/discharge enables, generator
+  charging, Battery Energy Manage and PV Energy Manage selects, and all three
+  charge and discharge periods (start/end, stop SOC, stop voltage, max power,
+  charge energy source). Times are sent as `"HHMM"` strings (integers are rejected
+  by the device). Grid-export options (Battery to grid sell, First to grid, On Grid
+  mode) are never offered or accepted. Slot 2/3 entities are disabled by default.
+  Export-capable options can be enabled with the model-29 integration option
+  "Allow grid export settings" (default off, validated server-side as well).
+  Load Power falls back to `loadPwr` when `loadEpsPwr` is absent.
+  Hybrid grid mode (`workMode`) is writable for options 2 and 3 only; On Grid (1) is refused because it allows export.
+- HESS-HY-S-12K-S: settings reads and writes refresh the token once and retry on a
+  401 instead of failing the write; a second failure stops the flush and starts
+  reauthentication.
+- HESS-HY-S-12K-S writes: the whole staged set is validated first and written in a safe
+  order (schedule disables first, enables last and only if the schedule's parameters were
+  confirmed); concurrent Write Settings calls are serialised; a value staged while an older
+  one is being written is kept; read-back confirmation is exact; non-finite numbers are
+  rejected cleanly. Nothing is sent if any staged value is invalid. An enabled schedule is
+  disabled before its parameters change and re-enabled only once they all confirmed. Read
+  Settings, Write Settings and clearing the staged edits wait for each other; Read Settings
+  only drops edits for keys it actually re-read and keeps all edits if the read fails. The
+  grid-export option fails closed on any non-boolean value. A 12K-S that was identified once
+  stays identified if a later status response omits `devModel`.
+- Documentation: manual extraction (`docs/hess-hy-s-12k-s-manual.md`) and the
+  model-29 write matrix (`docs/model29-write-plan.md`).
+
+### Fixed
+- HESS-HY-S-12K-S read-only settings sensors were never added to Home Assistant:
+  they used `EntityCategory.CONFIG`, which HA rejects for sensors, so all 40
+  showed unavailable. They now use the diagnostic category. A fresh login under
+  both `appPlat: ha` and `appPlat: iess` returns identical, current values from
+  `deviceNew/iotGet`, so no cloud-side staleness was found.
+- HESS-HY-S-12K-S Read Settings now refreshes a dedicated on-demand settings
+  coordinator, so model-29 read-only setting sensors update after the button is
+  pressed instead of retaining only their startup values.
+- Setup now offers a manual inverter-serial fallback when Hanchu authentication
+  succeeds but `/app/ha/getDeviceList` returns no devices. The supplied serial
+  is validated with `getDeviceStatus`, after which the existing station and
+  automatic battery discovery flow continues unchanged.
+- Live load power now uses `loadEpsPwr` and its explicit unit. On the
+  HESS-HY-S-12K-S, `loadPwr` can remain zero while `loadEpsPwr` reports the
+  actual backed-house load; this previously made Home Assistant show 0 W load.
+
+### Documentation
+- Inverter status recipe: added a variant for systems controlled by
+  Predbat's built-in Hanchu ESS integration, which uses `predbat.status` for
+  the Scheduled Charge / Scheduled Discharge statuses, because Predbat's slot
+  writes aren't reflected in this integration's slot time entities.
+
+## [2.3.1] - 2026-11-10
+
+### Fixed
+- The **Hanchuess Remote Settings** card failed to load on Home Assistant
+  2026.11, where the built-in Marketplace replaced HACS and took over the
+  `/hacsfiles` URLs the card was served from. The card is now served from the
+  integration's own path (`/hanchuess_card/`), and the existing dashboard
+  resource is updated automatically on startup. A version number in the URL
+  makes browsers load the new card after each update. If your dashboard
+  resources are managed in YAML, change the card's URL to
+  `/hanchuess_card/hanchuess-energy-card.js`.
+
+### Documentation
+- Added an [inverter status sensor recipe](docs/inverter-status.md)
+  (Fast Charging / Scheduled Charge / Charging / Idle, etc.) built from
+  helpers, template sensors and an automation. Contributed by @lancedfr (#33).
+
 ## [2.3.0] - 2026-11-04
 
 ### Changed
@@ -425,7 +506,8 @@ act on it straight away must now call `hanchuess.write_settings` after the write
 - Initial fork of the original integration with read-only battery, grid, PV, and
   load sensors and the custom Lovelace card.
 
-[Unreleased]: https://github.com/upton68/hanchu-ess-ha/compare/v2.3.0...HEAD
+[Unreleased]: https://github.com/upton68/hanchu-ess-ha/compare/v2.3.1...HEAD
+[2.3.1]: https://github.com/upton68/hanchu-ess-ha/compare/v2.3.0...v2.3.1
 [2.3.0]: https://github.com/upton68/hanchu-ess-ha/compare/v2.2.2...v2.3.0
 [2.2.2]: https://github.com/upton68/hanchu-ess-ha/compare/v2.2.1...v2.2.2
 [2.2.1]: https://github.com/upton68/hanchu-ess-ha/compare/v2.2.0...v2.2.1

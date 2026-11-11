@@ -25,6 +25,7 @@ from .models import (
     lookup_battery_model,
 )
 from .const import DOMAIN
+from .settings_12k import SETTING_SENSORS, decode_setting_value, is_12k_s
 from . import HanchuessConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
@@ -113,11 +114,15 @@ SENSORS = {
         "derive_mode": "negative_as_positive",
     },
     "load_power": {
-        "key": "loadPwr",
+        "key": "loadEpsPwr",
         "device_class": SensorDeviceClass.POWER,
         "state_class": SensorStateClass.MEASUREMENT,
         "unit": UnitOfPower.WATT,
         "icon": "mdi:home-lightning-bolt",
+        "auto_watt": True,
+        "unit_key": "loadEpsPwrUnit",
+        # Older/other responses carry the same aggregate as loadPwr (always W).
+        "fallback_key": "loadPwr",
     },
     "dg_power": {
         "key": "dgPAcTotal",
@@ -447,6 +452,18 @@ async def async_setup_entry(
             if statistics.data.get(cond_key) != config.get("condition_value"):
                 continue
         entities.append(HanchueSensor(statistics, entry, sensor_key, config))
+    if is_12k_s(entry):
+        for setting_key, config in SETTING_SENSORS.items():
+            entities.append(
+                HanchuessReadOnlySettingSensor(
+                    data.settings,
+                    entry,
+                    setting_key,
+                    config,
+                )
+            )
+        entities.append(HanchuessSettingsLastRefreshSensor(data.settings, entry))
+
     if battery_coordinator and entry.data.get("battery_serials"):
         for battery_serial in entry.data.get("battery_serials", []):
             battery_data = battery_coordinator.data.get(battery_serial, {})
@@ -475,7 +492,6 @@ async def async_setup_entry(
                     BatterySensor(battery_coordinator, entry, battery_serial, sensor_key, config)
                 )
     async_add_entities(entities)
-    # Add the pending settings count sensor (no coordinator — driven by staging buffer)
     async_add_entities([HanchuessSettingsPendingSensor(entry)])
     # Static model/rating sensors, resolved once at setup from devModel
     async_add_entities(
@@ -485,6 +501,93 @@ async def async_setup_entry(
             HanchuessModelSensor(entry, "battery_power_max"),
         ]
     )
+
+
+class HanchuessReadOnlySettingSensor(CoordinatorEntity, SensorEntity):
+    """Read-only model-29 setting backed by the settings coordinator."""
+
+    _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator, entry, setting_key: str, config: dict):
+        super().__init__(coordinator)
+        self._entry = entry
+        self._setting_key = setting_key
+        self._config = config
+        inverter_serial_number = entry.data["sn"]
+        self._attr_unique_id = f"{inverter_serial_number}_setting_{setting_key}"
+        self._attr_name = config["name"]
+        self._attr_icon = config.get("icon")
+        if config.get("unit"):
+            self._attr_native_unit_of_measurement = config["unit"]
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        inverter_serial_number = self._entry.data["sn"]
+        return DeviceInfo(
+            identifiers={(DOMAIN, inverter_serial_number)},
+            name=f"Hanchuess {inverter_serial_number}",
+            manufacturer="Hanchu",
+            model=inverter_model_name(self._entry),
+        )
+
+    @property
+    def native_value(self):
+        data = self.coordinator.data or {}
+        return decode_setting_value(
+            self._setting_key,
+            data.get(self._setting_key),
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return {
+            "source": "gateway/platform/deviceNew/iotGet",
+            "read_only": True,
+            "platform_key": self._setting_key,
+        }
+
+
+class HanchuessSettingsLastRefreshSensor(CoordinatorEntity, SensorEntity):
+    """Diagnostic timestamp for the most recent successful model-29 settings read."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Settings Last Refresh"
+    _attr_icon = "mdi:clock-check-outline"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+
+    def __init__(self, coordinator, entry):
+        super().__init__(coordinator)
+        self._entry = entry
+        self._attr_unique_id = f"{entry.data['sn']}_settings_last_refresh"
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        inverter_serial_number = self._entry.data["sn"]
+        return DeviceInfo(
+            identifiers={(DOMAIN, inverter_serial_number)},
+            name=f"Hanchuess {inverter_serial_number}",
+            manufacturer="Hanchu",
+            model=inverter_model_name(self._entry),
+        )
+
+    @property
+    def native_value(self):
+        return self.coordinator.last_update_success_time
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        data = self.coordinator.data or {}
+        return {
+            "last_update_success": self.coordinator.last_update_success,
+            "key_count": len(data),
+            "last_exception": (
+                str(self.coordinator.last_exception)
+                if self.coordinator.last_exception is not None
+                else None
+            ),
+        }
 
 
 class HanchueSensor(CoordinatorEntity, SensorEntity):
@@ -522,6 +625,9 @@ class HanchueSensor(CoordinatorEntity, SensorEntity):
     @property
     def native_value(self):
         value = self.coordinator.data.get(self._config["key"])
+        if value is None and self._config.get("fallback_key"):
+            # Fallback field carries no unit sibling and is reported raw.
+            return _as_number(self.coordinator.data.get(self._config["fallback_key"]))
         if value is None:
             return None
         if self._config.get("auto_watt"):
@@ -529,6 +635,13 @@ class HanchueSensor(CoordinatorEntity, SensorEntity):
             value = _scale_auto_watt(value, unit)
             if value is None:
                 return None
+            if value == 0 and self._config.get("fallback_key"):
+                # The preferred field reads zero: if the legacy aggregate reports
+                # a load, keep showing it (never hide a load behind a zero).
+                legacy = self.coordinator.data.get(self._config["fallback_key"])
+                legacy = _as_number(legacy)
+                if legacy is not None and legacy != 0:
+                    return legacy
         if "scale" in self._config:
             try:
                 value = round(float(value) * self._config["scale"], 1)
@@ -538,6 +651,15 @@ class HanchueSensor(CoordinatorEntity, SensorEntity):
         if derive_mode:
             return _derive_directional_power(value, derive_mode)
         return value
+
+
+def _as_number(value):
+    """Return ``value`` as a finite float, or None if it is not numeric."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if number == number and number not in (float("inf"), float("-inf")) else None
 
 
 class BatterySensor(CoordinatorEntity, SensorEntity):

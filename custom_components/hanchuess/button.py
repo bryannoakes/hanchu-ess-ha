@@ -10,6 +10,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .models import inverter_model_name
 from .const import DOMAIN
+from .settings_12k import is_12k_s
 from . import HanchuessConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
@@ -96,6 +97,25 @@ class HanchuessReadSettingsButton(ButtonEntity):
         client = self._entry.runtime_data.realtime.client
         _LOGGER.info("[HANCHUESS] Read Settings pressed for %s", inverter_serial_number)
         try:
+            if is_12k_s(self._entry):
+                coordinator = self._entry.runtime_data.settings
+                if coordinator is None:
+                    _LOGGER.error(
+                        "[HANCHUESS] Read Settings has no model-29 settings coordinator"
+                    )
+                    return
+                if not await coordinator.async_refresh_settings(
+                    self._entry.runtime_data.staging
+                ):
+                    # Keep pending edits: nothing replaced them.
+                    _LOGGER.warning("[HANCHUESS] Read Settings refresh failed")
+                    return
+                _LOGGER.info(
+                    "[HANCHUESS] Read Settings refreshed %d model-29 values at %s",
+                    len(coordinator.data or {}),
+                    coordinator.last_update_success_time,
+                )
+                return
             values = await client.async_iot_get(
                 inverter_serial_number, "2", ALL_CONTROL_KEYS
             )
@@ -115,7 +135,7 @@ class HanchuessReadSettingsButton(ButtonEntity):
 # ---------------------------------------------------------------------------
 
 class HanchuessWriteSettingsButton(ButtonEntity):
-    """Flushes all staged control-entity changes to the device via a single iotSet."""
+    """Flushes all staged control-entity changes to the device."""
 
     _attr_has_entity_name = True
     _attr_name = "Write Settings"

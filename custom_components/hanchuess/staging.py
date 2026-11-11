@@ -1,7 +1,7 @@
 """Staging buffer for Hanchuess settings writes.
 
 Accumulates control-entity changes in memory and flushes them to the device
-in a single iotSet call when the user presses Write Settings (or calls the
+when the user presses Write Settings (or calls the
 hanchuess.write_settings service).  Has no Home Assistant dependencies so it
 can be tested without a running hass instance.
 """
@@ -59,6 +59,18 @@ class SettingsStagingBuffer:
                 removed = True
         if removed:
             self._notify()
+
+    def discard_if_value(self, key: str, value: Any) -> bool:
+        """Remove ``key`` only if it is still staged with ``value``.
+
+        A flush uses this so a newer edit staged while the older value was being
+        written is kept.  Returns True if the key was removed.
+        """
+        if key in self.pending and self.pending[key] == value:
+            del self.pending[key]
+            self._notify()
+            return True
+        return False
 
     # ------------------------------------------------------------------
     # Read-only helpers

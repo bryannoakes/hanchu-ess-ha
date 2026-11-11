@@ -1,5 +1,6 @@
 """Hanchuess Home Assistant integration."""
 import logging
+import json
 import os
 import asyncio
 from dataclasses import dataclass
@@ -11,6 +12,7 @@ from homeassistant.exceptions import ConfigEntryNotReady
 import homeassistant.helpers.device_registry as dr
 import homeassistant.helpers.config_validation as cv
 from .const import DOMAIN, PLATFORMS, BASE_URL
+from .settings_12k import MODEL_CODE as MODEL_12K_CODE
 from .api import HanchuessApiClient
 from .battery import merge_battery_serials
 from .models import (
@@ -23,6 +25,7 @@ from .coordinator import (
     HanchuessRealtimeCoordinator,
     HanchuessStatisticsCoordinator,
     HanchuessBatteryCoordinator,
+    HanchuessSettingsCoordinator,
 )
 from .staging import SettingsStagingBuffer
 
@@ -37,7 +40,24 @@ SERVICE_SCHEMA = vol.Schema({
     vol.Required("value"): dict,
 })
 
-CARD_URL = "/hacsfiles/hanchuess/hanchuess-energy-card.js"
+# The card is served from the integration's own path. It used to live under
+# /hacsfiles/hanchuess, but /hacsfiles belongs to HACS - which Home Assistant
+# 2026.11 replaced with the built-in Marketplace - so that URL stopped serving
+# the card. The version query makes browsers fetch the new file after updates.
+CARD_URL_BASE = "/hanchuess_card"
+CARD_FILE = "hanchuess-energy-card.js"
+LEGACY_CARD_URL_BASE = "/hacsfiles/hanchuess"
+
+
+def _manifest_version() -> str:
+    try:
+        with open(os.path.join(os.path.dirname(__file__), "manifest.json"), encoding="utf-8") as fh:
+            return json.load(fh).get("version", "0")
+    except (OSError, ValueError):
+        return "0"
+
+
+CARD_URL = f"{CARD_URL_BASE}/{CARD_FILE}?v={_manifest_version()}"
 
 
 @dataclass
@@ -47,6 +67,7 @@ class HanchuessData:
     realtime: HanchuessRealtimeCoordinator
     statistics: HanchuessStatisticsCoordinator
     battery: HanchuessBatteryCoordinator | None
+    settings: HanchuessSettingsCoordinator | None
     number_limits: dict
     startup_values: dict
     staging: SettingsStagingBuffer
@@ -83,12 +104,75 @@ def _find_entry(hass: HomeAssistant, sn: str | None = None):
     return None
 
 
+def _resolve_inverter_model(hass, entry, dev_model):
+    """Identify the model from the status ``devModel``.
+
+    A status response that omits ``devModel`` must not make a known
+    HESS-HY-S-12K-S look unrecognised (that would re-enable the generic write
+    paths), so a 12K-S identified earlier is remembered in the config entry
+    and used when the code is absent.
+    """
+    if dev_model in (None, ""):
+        dev_model = entry.data.get("dev_model")
+    model = lookup_inverter_model(dev_model)
+    if (
+        model is not None
+        and model.code == MODEL_12K_CODE
+        and entry.data.get("dev_model") != model.code
+    ):
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, "dev_model": model.code}
+        )
+    return model
+
+
+async def _async_flush_staged_model_29(hass: HomeAssistant, entry) -> bool:
+    """Flush staged model-29 settings through the guarded, read-back-confirmed writer."""
+    staging = entry.runtime_data.staging
+    snapshot = staging.snapshot()
+    if not snapshot:
+        return True
+    settings = entry.runtime_data.settings
+    inverter_serial_number = entry.data["sn"]
+    if settings is None:
+        _LOGGER.error("[HANCHUESS] No model-29 settings coordinator for %s", inverter_serial_number)
+        return False
+    _LOGGER.info(
+        "[HANCHUESS] Writing %d staged model-29 setting(s): %s",
+        len(snapshot), list(snapshot),
+    )
+    errors = await settings.async_write_staged(staging)
+    if not errors:
+        _LOGGER.info("[HANCHUESS] Write Settings succeeded for %s", inverter_serial_number)
+        return True
+    _LOGGER.error("[HANCHUESS] Write Settings failed for %s: %s", inverter_serial_number, errors)
+    try:
+        hass.components.persistent_notification.async_create(
+            title="Hanchuess — Write Settings Failed",
+            message=(
+                f"Some settings could not be written to inverter **{inverter_serial_number}**.\n\n"
+                + "\n".join(f"- `{k}`: {v}" for k, v in errors.items())
+                + "\n\nThose changes are still staged — press **Write Settings** again to retry."
+            ),
+            notification_id=f"hanchuess_write_failed_{inverter_serial_number}",
+        )
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.warning("[HANCHUESS] Could not create persistent notification: %s", err)
+    return False
+
+
 async def async_flush_staged(hass: HomeAssistant, entry) -> bool:
     """Flush all staged settings for ``entry`` to the device in one iotSet call.
 
     Returns True on success, False on failure.  On double failure a persistent
     notification is created and the buffer is left intact so the user can retry.
     """
+    if (
+        entry.runtime_data.inverter_model is not None
+        and entry.runtime_data.inverter_model.code == MODEL_12K_CODE
+    ):
+        return await _async_flush_staged_model_29(hass, entry)
+
     staging = entry.runtime_data.staging
     snapshot = staging.snapshot()
     if not snapshot:
@@ -163,6 +247,21 @@ async def async_device_control_service(hass: HomeAssistant, call: ServiceCall) -
     if not coordinator:
         message = f"Device {inverter_serial_number} not found"
         _LOGGER.error("[HANCHUESS] device_control: %s", message)
+        return {"success": False, "message": message}
+
+    entry = _find_entry(hass, inverter_serial_number)
+    # Blocked on the target's model alone: a caller-supplied dev_type must never
+    # decide whether the generic /app/ha/iotSet path is reachable.
+    if (
+        entry is not None
+        and entry.runtime_data.inverter_model is not None
+        and entry.runtime_data.inverter_model.code == MODEL_12K_CODE
+    ):
+        message = (
+            "Generic settings writes are disabled for HESS-HY-S-12K-S; "
+            "use its model-specific setting entities and Write Settings."
+        )
+        _LOGGER.error("[HANCHUESS] device_control blocked: %s", message)
         return {"success": False, "message": message}
 
     result = await coordinator.client.async_device_control(
@@ -266,17 +365,23 @@ async def _refresh_battery_serials(
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     hass.data.setdefault(DOMAIN, {})
 
+    from homeassistant.components.http import StaticPathConfig
+
+    www = os.path.join(os.path.dirname(__file__), "www")
     try:
-        from homeassistant.components.http import StaticPathConfig
-        await hass.http.async_register_static_paths([
-            StaticPathConfig(
-                "/hacsfiles/hanchuess",
-                os.path.join(os.path.dirname(__file__), "www"),
-                cache_headers=False,
-            )
-        ])
+        await hass.http.async_register_static_paths(
+            [StaticPathConfig(CARD_URL_BASE, www, cache_headers=False)]
+        )
     except Exception:
         _LOGGER.warning("[HANCHUESS] Static path registration failed")
+    try:
+        # Old URL, kept for dashboards whose resources are managed in YAML.
+        # Best effort: on 2026.11+ the Marketplace may own /hacsfiles.
+        await hass.http.async_register_static_paths(
+            [StaticPathConfig(LEGACY_CARD_URL_BASE, www, cache_headers=False)]
+        )
+    except Exception:
+        _LOGGER.debug("[HANCHUESS] Legacy /hacsfiles card path not registered")
 
     websocket_api.async_register_command(hass, ws_iot_get)
     websocket_api.async_register_command(hass, ws_iot_set)
@@ -313,6 +418,17 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             _LOGGER.error(
                 "[HANCHUESS] fast_charge: device %s not found",
                 inverter_serial_number,
+            )
+            return
+
+        entry = _find_entry(hass, inverter_serial_number)
+        if (
+            entry is not None
+            and entry.runtime_data.inverter_model is not None
+            and entry.runtime_data.inverter_model.code == MODEL_12K_CODE
+        ):
+            _LOGGER.error(
+                "[HANCHUESS] fast_charge blocked for HESS-HY-S-12K-S"
             )
             return
 
@@ -384,8 +500,23 @@ async def ws_iot_get(hass, connection, msg):
             msg["id"], "not_found", f"Device {inverter_serial_number} not found"
         )
         return
-    result = await coordinator.client.async_iot_get(inverter_serial_number, dev_type, keys)
     entry = _find_entry(hass, inverter_serial_number)
+    if (
+        entry is not None
+        and entry.runtime_data.inverter_model is not None
+        and entry.runtime_data.inverter_model.code == MODEL_12K_CODE
+    ):
+        result = await coordinator.client.async_platform_iot_get(
+            inverter_serial_number, dev_type, keys
+        )
+        settings_coordinator = entry.runtime_data.settings
+        if settings_coordinator is not None and result:
+            merged = {**(settings_coordinator.data or {}), **result}
+            settings_coordinator.async_set_updated_data(merged)
+    else:
+        result = await coordinator.client.async_iot_get(
+            inverter_serial_number, dev_type, keys
+        )
     if entry is not None:
         from .button import apply_iot_values
 
@@ -422,6 +553,19 @@ async def ws_iot_set(hass, connection, msg):
             msg["id"], "not_found", f"Device {inverter_serial_number} not found"
         )
         return
+    entry = _find_entry(hass, inverter_serial_number)
+    if (
+        entry is not None
+        and entry.runtime_data.inverter_model is not None
+        and entry.runtime_data.inverter_model.code == MODEL_12K_CODE
+    ):
+        connection.send_error(
+            msg["id"],
+            "unsupported_model_write",
+            "Generic settings writes are disabled for HESS-HY-S-12K-S",
+        )
+        return
+
     result = await coordinator.client.async_device_control(
         inverter_serial_number, dev_type, value
     )
@@ -458,6 +602,19 @@ async def ws_fast_charge(hass, connection, msg):
             msg["id"], "not_found", f"Device {inverter_serial_number} not found"
         )
         return
+    entry = _find_entry(hass, inverter_serial_number)
+    if (
+        entry is not None
+        and entry.runtime_data.inverter_model is not None
+        and entry.runtime_data.inverter_model.code == MODEL_12K_CODE
+    ):
+        connection.send_error(
+            msg["id"],
+            "unsupported_model_write",
+            "Fast charge/discharge is not supported for HESS-HY-S-12K-S",
+        )
+        return
+
     result = await coordinator.client.async_fast_charge_discharge(
         inverter_serial_number, msg["act"], msg["duration"]
     )
@@ -485,7 +642,12 @@ async def ws_clear_staging(hass, connection, msg):
             msg["id"], "not_found", f"Device {inverter_serial_number} not found"
         )
         return
-    entry.runtime_data.staging.clear()
+    settings = entry.runtime_data.settings
+    if settings is not None:
+        # Waits for any flush in progress, then clears and refreshes entities.
+        await settings.async_clear_staged(entry.runtime_data.staging)
+    else:
+        entry.runtime_data.staging.clear()
     _LOGGER.debug("[HANCHUESS] Staging buffer cleared via WS for %s", inverter_serial_number)
     connection.send_result(msg["id"], {})
 
@@ -506,10 +668,23 @@ async def _async_register_card_resource(hass: HomeAssistant) -> None:
         return
     resources = lovelace_data.resources
     await resources.async_get_info()  # forces the lazy load from storage
-    if any("hanchuess-energy-card" in r.get("url", "") for r in resources.async_items()):
+    existing = [
+        r for r in resources.async_items() if CARD_FILE in r.get("url", "")
+    ]
+    if not existing:
+        await resources.async_create_item({"res_type": "module", "url": CARD_URL})
+        _LOGGER.info("[HANCHUESS] Card resource auto-registered")
         return
-    await resources.async_create_item({"res_type": "module", "url": CARD_URL})
-    _LOGGER.info("[HANCHUESS] Card resource auto-registered")
+    # Point an old entry (e.g. /hacsfiles/..., or a URL rewritten by the
+    # HACS-to-Marketplace migration) or an older version at the current URL.
+    for item in existing:
+        if item.get("url") != CARD_URL:
+            await resources.async_update_item(
+                item["id"], {"res_type": "module", "url": CARD_URL}
+            )
+            _LOGGER.info(
+                "[HANCHUESS] Card resource updated: %s -> %s", item.get("url"), CARD_URL
+            )
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: HanchuessConfigEntry) -> bool:
@@ -595,7 +770,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: HanchuessConfigEntry) ->
     # 3 kW to 10 kW alike), so where the model table knows the battery
     # maximum it overrides the menu. Unknown codes keep the menu values.
     dev_model = (coordinator.data or {}).get("devModel")
-    inverter_model = lookup_inverter_model(dev_model)
+    inverter_model = _resolve_inverter_model(hass, entry, dev_model)
     if inverter_model is None:
         _LOGGER.info(
             "[HANCHUESS] Inverter model not recognised (devModel=%r); "
@@ -624,29 +799,40 @@ async def async_setup_entry(hass: HomeAssistant, entry: HanchuessConfigEntry) ->
                 menu_max,
             )
 
-    # Fetch all current values in one iotGet call — relies on the API
-    # client's own internal retry/timeout handling (see api.py)
+    # Model 29 uses an on-demand coordinator so startup and Read Settings
+    # share the same HA-native refresh path. Other models retain the generic
+    # one-shot iotGet startup read.
+    settings_coordinator = None
     startup_values = {}
     try:
-        startup_values = await client.async_iot_get(
-            inverter_serial_number,
-            "2",
-            [
-                "WORK_MODE_CMB",
-                "CHG_PWR_LMT",
-                "DSCHG_PWR_LMT",
-                "CHG_BAT_SOC_LMT",
-                "DSCHG_BAT_SOC_LMT",
-                "DTU_AC_CHG_SOC_LMT",
-                "TCT_START_1", "TCT_END_1",
-                "TCT_START_2", "TCT_END_2",
-                "TCT_START_3", "TCT_END_3",
-                "TDT_START_1", "TDT_END_1",
-                "TDT_START_2", "TDT_END_2",
-                "TDT_START_3", "TDT_END_3",
-            ]
-        )
-        _LOGGER.info("[HANCHUESS] Startup values fetched: %s", startup_values)
+        if inverter_model is not None and inverter_model.code == MODEL_12K_CODE:
+            settings_coordinator = HanchuessSettingsCoordinator(hass, entry, client)
+            await _async_initial_refresh(settings_coordinator, entry)
+            startup_values = settings_coordinator.data or {}
+            _LOGGER.info(
+                "[HANCHUESS] Model-29 settings coordinator loaded %d keys",
+                len(startup_values),
+            )
+        else:
+            startup_values = await client.async_iot_get(
+                inverter_serial_number,
+                "2",
+                [
+                    "WORK_MODE_CMB",
+                    "CHG_PWR_LMT",
+                    "DSCHG_PWR_LMT",
+                    "CHG_BAT_SOC_LMT",
+                    "DSCHG_BAT_SOC_LMT",
+                    "DTU_AC_CHG_SOC_LMT",
+                    "TCT_START_1", "TCT_END_1",
+                    "TCT_START_2", "TCT_END_2",
+                    "TCT_START_3", "TCT_END_3",
+                    "TDT_START_1", "TDT_END_1",
+                    "TDT_START_2", "TDT_END_2",
+                    "TDT_START_3", "TDT_END_3",
+                ],
+            )
+            _LOGGER.info("[HANCHUESS] Startup values fetched: %s", startup_values)
     except Exception as err:
         _LOGGER.warning("[HANCHUESS] Could not fetch startup values: %s", err)
         
@@ -663,6 +849,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: HanchuessConfigEntry) ->
         realtime=coordinator,
         statistics=stats_coordinator,
         battery=battery_coordinator,
+        settings=settings_coordinator,
         number_limits=number_limits,
         startup_values=startup_values,
         staging=SettingsStagingBuffer(),
@@ -673,7 +860,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: HanchuessConfigEntry) ->
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    if startup_values:
+    if startup_values and settings_coordinator is None:
         from .button import apply_iot_values
         apply_iot_values(entry, startup_values)
         _LOGGER.info(

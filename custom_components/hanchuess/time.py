@@ -3,12 +3,15 @@ import asyncio
 import logging
 from datetime import time
 from homeassistant.components.time import TimeEntity
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.entity import DeviceInfo
 from .models import inverter_model_name
 from .const import DOMAIN
+from .settings_12k import is_12k_s
+from .settings_12k_entities import build_entities
 from . import HanchuessConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
@@ -82,6 +85,13 @@ TIME_SLOTS = {
 async def async_setup_entry(
     hass: HomeAssistant, entry: HanchuessConfigEntry, async_add_entities: AddEntitiesCallback
 ):
+    if is_12k_s(entry):
+        _LOGGER.info("[HANCHUESS] Skipping generic time-slot controls for HESS-HY-S-12K-S")
+        settings = entry.runtime_data.settings
+        if settings is not None:
+            async_add_entities(build_entities(entry, settings, ('hhmm',)))
+        return
+
     data = entry.runtime_data
     client = data.realtime.client
     startup_values = data.startup_values

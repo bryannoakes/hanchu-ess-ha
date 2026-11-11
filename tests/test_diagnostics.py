@@ -54,6 +54,7 @@ def _make_runtime_data(**overrides):
         "realtime": SimpleNamespace(data={}),
         "statistics": SimpleNamespace(data={}),
         "battery": None,
+        "settings": None,
         "number_limits": {},
         "startup_values": {},
         "staging": SettingsStagingBuffer(),
@@ -96,6 +97,7 @@ async def test_full_diagnostics_includes_all_sections():
         "battery",
         "number_limits",
         "inverter_model",
+        "settings",
         "startup_values",
     }
     assert diag["device_status"] == {"batSoc": 55, "loadPwr": 800}
@@ -105,6 +107,7 @@ async def test_full_diagnostics_includes_all_sections():
     assert diag["battery"]["payload_count"] == 1
     assert diag["battery"]["payload"]["battery_1"]["tBat1"] == 23.5
     assert diag["battery"]["payload"]["battery_1"]["sn"] == REDACTED
+    assert diag["settings"] == {}
     assert diag["startup_values"] == {"WORK_MODE_CMB": "1"}
 
 
@@ -133,6 +136,22 @@ async def test_resolved_block_preserves_dev_type_redacts_sn():
 
     assert diag["resolved"]["dev_type"] == "2"
     assert diag["resolved"]["sn"] == REDACTED
+
+
+async def test_model_29_settings_block_redacts_identifiers_keeps_settings():
+    # Model-29 settings come from platform iotGet; an identifier that slipped
+    # into that payload must be redacted while real settings stay readable.
+    entry = _FakeEntry()
+    entry.runtime_data = _make_runtime_data(
+        settings=SimpleNamespace(data={"sn": "SN123", "stationId": "st-1", "chgSocLmt": "97"}),
+    )
+
+    diag = await async_get_config_entry_diagnostics(MagicMock(), entry)
+
+    assert diag["settings"]["sn"] == REDACTED
+    assert diag["settings"]["stationId"] == REDACTED
+    assert diag["settings"]["chgSocLmt"] == "97"
+    assert "SN123" not in repr(diag) and "secret-token" not in repr(diag)
 
 
 async def test_redaction_reaches_nested_coordinator_data():
@@ -214,3 +233,16 @@ async def test_diagnostics_reports_unrecognised_dev_model():
     )
     diag = await async_get_config_entry_diagnostics(MagicMock(), entry)
     assert diag["inverter_model"] == {"dev_model": "99", "name": None}
+
+
+async def test_status_link_is_redacted_from_diagnostics():
+    entry = _FakeEntry()
+    entry.runtime_data = _make_runtime_data(
+        realtime=SimpleNamespace(data={"wkLink": "https://example.invalid/?sn=SN123", "batSoc": 55}),
+    )
+
+    diag = await async_get_config_entry_diagnostics(MagicMock(), entry)
+
+    assert diag["device_status"]["wkLink"] == REDACTED
+    assert diag["device_status"]["batSoc"] == 55
+    assert "SN123" not in repr(diag["device_status"])

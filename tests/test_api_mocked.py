@@ -23,6 +23,7 @@ STATUS = f"{BASE_URL}/gateway/app/ha/getDeviceStatus"
 STATISTICS = f"{BASE_URL}/gateway/app/ha/getDeviceStatistics"
 MENU = f"{BASE_URL}/gateway/app/ha/menu"
 IOT_GET = f"{BASE_URL}/gateway/app/ha/iotGet"
+PLATFORM_IOT_GET = f"{BASE_URL}/gateway/platform/deviceNew/iotGet"
 IOT_SET = f"{BASE_URL}/gateway/app/ha/iotSet"
 FAST = f"{BASE_URL}/gateway/app/ha/fastChargeDischarge"
 BMS = f"{BASE_URL}/gateway/platform/bmsInfo/queryBatteryDataDivisions"
@@ -179,6 +180,26 @@ async def test_get_devices_empty_on_unsuccess(hass):
         m.post(DEVICE_LIST, payload={"success": False})
         devices = await client.async_get_devices()
     assert devices == []
+    assert client.devices_query_failed is True
+
+
+async def test_get_devices_empty_success_is_not_a_failure(hass):
+    client = HanchuessApiClient(hass, BASE_URL, token="t")
+    with aioresponses() as m:
+        m.post(DEVICE_LIST, payload={"success": True, "data": []})
+        assert await client.async_get_devices() == []
+    assert client.devices_query_failed is False
+
+
+async def test_get_devices_flag_clears_after_a_good_call(hass):
+    client = HanchuessApiClient(hass, BASE_URL, token="t")
+    with aioresponses() as m:
+        m.post(DEVICE_LIST, payload={"success": False})
+        m.post(DEVICE_LIST, payload={"success": True, "data": [{"sn": "SN1"}]})
+        await client.async_get_devices()
+        assert client.devices_query_failed is True
+        await client.async_get_devices()
+    assert client.devices_query_failed is False
 
 
 # ---------------------------------------------------------------------------
@@ -378,6 +399,37 @@ async def test_iot_get_success(hass):
         m.post(IOT_GET, payload={"success": True, "data": {"WORK_MODE_CMB": "1"}})
         data = await client.async_iot_get("SN1", "2", ["WORK_MODE_CMB"])
     assert data == {"WORK_MODE_CMB": "1"}
+
+
+
+async def test_platform_iot_get_success(hass):
+    client = HanchuessApiClient(hass, BASE_URL, token="t")
+
+    with aioresponses() as m:
+        m.post(
+            PLATFORM_IOT_GET,
+            payload={
+                "code": 200,
+                "success": True,
+                "data": {"workMode": "3", "chgSocLmt": "98"},
+            },
+        )
+        data = await client.async_platform_iot_get(
+            "SN1", "2", ["workMode", "chgSocLmt"]
+        )
+
+    assert data == {"workMode": "3", "chgSocLmt": "98"}
+
+
+async def test_platform_iot_get_failure_returns_empty(hass):
+    client = HanchuessApiClient(hass, BASE_URL, token="t")
+    with aioresponses() as m:
+        m.post(
+            PLATFORM_IOT_GET,
+            payload={"code": 100, "success": False, "data": "900001"},
+        )
+        data = await client.async_platform_iot_get("SN1", "2", ["workMode"])
+    assert data == {}
 
 
 # ---------------------------------------------------------------------------

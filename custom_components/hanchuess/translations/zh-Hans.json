@@ -45,7 +45,8 @@
           "realtime_interval": "实时轮询间隔（秒）",
           "statistics_interval": "统计轮询间隔（秒）",
           "battery_interval": "电池轮询间隔（秒）",
-          "fast_charge_duration": "快充/快放时长（分钟)"
+          "fast_charge_duration": "快充/快放时长（分钟)",
+          "allow_grid_export": "允许并网卖电设置（仅 HESS-HY-S-12K-S）"
         }
       }
     }

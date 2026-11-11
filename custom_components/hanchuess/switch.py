@@ -1,11 +1,15 @@
 """Switch platform for Hanchuess - Fast charge and discharge controls."""
 import logging
 from homeassistant.components.switch import SwitchEntity
+from homeassistant.const import EntityCategory
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.entity import DeviceInfo
 from .models import inverter_model_name
 from .const import DOMAIN, CONF_FAST_CHARGE_DURATION, DEFAULT_FAST_CHARGE_DURATION
+from .settings_12k import is_12k_s
+from .settings_12k_entities import build_entities
 from . import HanchuessConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
@@ -24,6 +28,16 @@ def _fast_charge_duration(entry) -> int:
 async def async_setup_entry(
     hass: HomeAssistant, entry: HanchuessConfigEntry, async_add_entities: AddEntitiesCallback
 ):
+    if is_12k_s(entry):
+        _LOGGER.info(
+            "[HANCHUESS] Fast charge/discharge controls are not supported for "
+            "HESS-HY-S-12K-S"
+        )
+        settings = entry.runtime_data.settings
+        if settings is not None:
+            async_add_entities(build_entities(entry, settings, ('bool',)))
+        return
+
     data = entry.runtime_data
     client = data.realtime.client
     async_add_entities([

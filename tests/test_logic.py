@@ -6,6 +6,7 @@ module skips if it is unavailable.
 from datetime import time as dt_time
 import math
 from unittest.mock import AsyncMock, MagicMock
+from types import SimpleNamespace
 
 import pytest
 
@@ -28,6 +29,8 @@ from custom_components.hanchuess.sensor import (
     BatterySensor,
     BATTERY_SENSORS,
     _battery_temperature_count,
+    HanchuessReadOnlySettingSensor,
+    HanchuessSettingsLastRefreshSensor,
 )
 
 
@@ -182,11 +185,42 @@ def test_auto_watt_small_value_misscaled_only_without_unit():
     assert s.native_value == 8000.0
 
 
-def test_load_power_is_raw_watts():
-    # load_power reads loadPwr, which has no `<field>Unit` sibling and is always
-    # reported in watts, so it is surfaced raw (no auto_watt, no misscale).
-    s = _make_sensor(SENSORS["load_power"], 8)
-    assert s.native_value == 8
+def test_load_power_uses_combined_eps_load_with_explicit_unit():
+    # HESS-HY-S-12K-S can report loadPwr=0 while loadEpsPwr carries the actual
+    # backed-house load. Use loadEpsPwr and its explicit unit so the live power
+    # balance matches battery + grid input.
+    s = _make_sensor(SENSORS["load_power"], 903.3, unit="W")
+    assert s.native_value == 903.3
+
+
+def test_load_power_falls_back_to_load_pwr_when_eps_field_absent():
+    # Responses without loadEpsPwr (other models/firmware) keep the raw watts field.
+    coordinator = MagicMock()
+    coordinator.data = {"loadPwr": 687.3}
+    s = HanchueSensor(coordinator, _FakeEntry(), "load_power", SENSORS["load_power"])
+    assert s.native_value == 687.3
+
+
+def test_load_power_prefers_eps_field_over_zero_load_pwr():
+    coordinator = MagicMock()
+    coordinator.data = {"loadPwr": 0.0, "loadEpsPwr": 2.02, "loadEpsPwrUnit": "kW"}
+    s = HanchueSensor(coordinator, _FakeEntry(), "load_power", SENSORS["load_power"])
+    assert s.native_value == 2020.0
+
+
+def test_load_power_never_hides_a_load_behind_a_zero_eps_field():
+    # If loadEpsPwr reads 0 but loadPwr reports a load, show the load.
+    coordinator = MagicMock()
+    coordinator.data = {"loadPwr": 450.0, "loadEpsPwr": 0.0, "loadEpsPwrUnit": "kW"}
+    s = HanchueSensor(coordinator, _FakeEntry(), "load_power", SENSORS["load_power"])
+    assert s.native_value == 450.0
+
+
+def test_load_power_both_zero_reads_zero():
+    coordinator = MagicMock()
+    coordinator.data = {"loadPwr": 0.0, "loadEpsPwr": 0.0, "loadEpsPwrUnit": "kW"}
+    s = HanchueSensor(coordinator, _FakeEntry(), "load_power", SENSORS["load_power"])
+    assert s.native_value == 0
 
 
 def test_auto_watt_non_numeric_returns_none():
@@ -742,3 +776,137 @@ def test_pending_sensor_resets_to_zero_after_clear():
 def test_pending_sensor_unique_id():
     sensor, _ = _make_pending_sensor("MYSERIAL")
     assert sensor.unique_id == "MYSERIAL_pending_settings_changes"
+
+
+# ---------------------------------------------------------------------------
+# HESS-HY-S-12K-S read-only settings decoder
+# ---------------------------------------------------------------------------
+
+from custom_components.hanchuess.settings_12k import decode_setting_value
+
+
+def test_12k_setting_decodes_hhmm():
+    assert decode_setting_value("startChgTime1", "0730") == "07:30"
+
+
+def test_12k_setting_decodes_zero_hhmm():
+    assert decode_setting_value("startDischgTime1", "0000") == "00:00"
+
+
+def test_12k_setting_decodes_known_mode():
+    assert decode_setting_value("batDischgManagement", "2") == "Battery to home load"
+
+
+def test_12k_setting_decodes_numeric_units():
+    assert decode_setting_value("chgSocLmt", "98") == 98
+    assert decode_setting_value("timePeriod1MaxChgPwr", "6600") == 6600
+
+
+def test_12k_setting_decodes_work_mode_options():
+    assert decode_setting_value("workMode", "2") == "Limit power to UPS load"
+
+
+def test_12k_setting_preserves_unknown_enum_value():
+    assert decode_setting_value("workMode", "9") == "9"
+
+
+# ---------------------------------------------------------------------------
+# Model-29 settings refresh coordinator wiring
+# ---------------------------------------------------------------------------
+
+from custom_components.hanchuess.button import HanchuessReadSettingsButton
+from custom_components.hanchuess.settings_12k import SETTING_SENSORS
+
+
+async def test_12k_read_settings_button_refreshes_settings_coordinator():
+    entry = _FakeEntryWithStaging()
+    entry.runtime_data.inverter_model = SimpleNamespace(code=29)
+    entry.runtime_data.realtime = SimpleNamespace(client=AsyncMock())
+    settings = MagicMock()
+    settings.async_refresh_settings = AsyncMock(return_value=True)
+    settings.last_update_success = True
+    settings.data = {"chgSocLmt": "95"}
+    entry.runtime_data.settings = settings
+
+    button = HanchuessReadSettingsButton(MagicMock(), entry)
+    await button.async_press()
+
+    settings.async_refresh_settings.assert_awaited_once_with(entry.runtime_data.staging)
+
+
+def test_12k_setting_sensor_reads_current_coordinator_data():
+    coordinator = MagicMock()
+    coordinator.data = {"chgSocLmt": "98"}
+    entry = _FakeEntryWithStaging()
+    sensor = HanchuessReadOnlySettingSensor(
+        coordinator,
+        entry,
+        "chgSocLmt",
+        SETTING_SENSORS["chgSocLmt"],
+    )
+
+    assert sensor.native_value == 98
+
+    coordinator.data = {"chgSocLmt": "95"}
+    assert sensor.native_value == 95
+
+
+def test_12k_settings_last_refresh_sensor_exposes_coordinator_timestamp():
+    from datetime import datetime, timezone
+
+    coordinator = MagicMock()
+    coordinator.last_update_success_time = datetime(2026, 11, 10, 14, 0, tzinfo=timezone.utc)
+    coordinator.last_update_success = True
+    coordinator.last_exception = None
+    coordinator.data = {"workMode": "3", "chgSocLmt": "98"}
+    entry = _FakeEntryWithStaging()
+
+    sensor = HanchuessSettingsLastRefreshSensor(coordinator, entry)
+
+    assert sensor.native_value == coordinator.last_update_success_time
+    assert sensor.extra_state_attributes["key_count"] == 2
+    assert sensor.extra_state_attributes["last_update_success"] is True
+
+
+def test_read_only_setting_sensor_category_is_valid_for_sensors():
+    """HA rejects sensor entities with entity_category=config at add time."""
+    from homeassistant.const import EntityCategory
+    from custom_components.hanchuess.sensor import HanchuessReadOnlySettingSensor
+
+    assert HanchuessReadOnlySettingSensor._attr_entity_category is not EntityCategory.CONFIG
+
+
+async def test_12k_read_settings_failure_keeps_pending_edits():
+    entry = _FakeEntryWithStaging()
+    entry.runtime_data.inverter_model = SimpleNamespace(code=29)
+    entry.runtime_data.realtime = SimpleNamespace(client=AsyncMock())
+    settings = MagicMock()
+    settings.async_refresh_settings = AsyncMock(return_value=False)  # cloud read failed
+    settings.last_update_success = False
+    entry.runtime_data.settings = settings
+    entry.runtime_data.staging.stage("chgSocLmt", 90)
+
+    await HanchuessReadSettingsButton(MagicMock(), entry).async_press()
+
+    assert entry.runtime_data.staging.snapshot() == {"chgSocLmt": 90}
+
+
+def test_load_power_fallback_value_is_numeric_when_the_field_is_a_string():
+    coordinator = MagicMock()
+    coordinator.data = {"loadPwr": "450"}
+    s = HanchueSensor(coordinator, _FakeEntry(), "load_power", SENSORS["load_power"])
+    assert s.native_value == 450.0
+
+
+def test_load_power_zero_rule_returns_numeric_for_a_string_legacy_value():
+    coordinator = MagicMock()
+    coordinator.data = {"loadPwr": "450", "loadEpsPwr": 0.0, "loadEpsPwrUnit": "kW"}
+    s = HanchueSensor(coordinator, _FakeEntry(), "load_power", SENSORS["load_power"])
+    assert s.native_value == 450.0
+
+
+def test_load_power_non_numeric_fallback_is_none():
+    coordinator = MagicMock()
+    coordinator.data = {"loadPwr": "n/a"}
+    s = HanchueSensor(coordinator, _FakeEntry(), "load_power", SENSORS["load_power"])
+    assert s.native_value is None

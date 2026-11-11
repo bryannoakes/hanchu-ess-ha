@@ -10,7 +10,7 @@ from homeassistant.helpers.device_registry import DeviceEntry
 from . import HanchuessConfigEntry
 
 TO_REDACT = {"token", "account", "password", "sn", "stationId", "username", "pwd",
-             "unique_id", "title", "devId", "battery_serials", "deviceId"}
+             "unique_id", "title", "devId", "battery_serials", "deviceId", "wkLink"}
 
 
 def _redact_battery_payload(payload: Any) -> dict[str, Any]:
@@ -76,6 +76,10 @@ async def async_get_config_entry_diagnostics(
         }
         if model is not None
         else {"dev_model": (getattr(store.realtime, "data", None) or {}).get("devModel"), "name": None}
+    )
+    settings = getattr(store, "settings", None)
+    diag["settings"] = async_redact_data(
+        getattr(settings, "data", None) or {}, TO_REDACT
     )
     diag["startup_values"] = async_redact_data(
         store.startup_values or {}, TO_REDACT
