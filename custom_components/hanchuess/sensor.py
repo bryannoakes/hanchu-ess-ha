@@ -539,6 +539,15 @@ class HanchueSensor(CoordinatorEntity, SensorEntity):
             value = _scale_auto_watt(value, unit)
             if value is None:
                 return None
+            if value == 0 and self._config.get("fallback_key"):
+                # The preferred field reads zero: if the legacy aggregate reports
+                # a load, keep showing it (never hide a load behind a zero).
+                legacy = self.coordinator.data.get(self._config["fallback_key"])
+                try:
+                    if legacy is not None and float(legacy) != 0:
+                        return legacy
+                except (TypeError, ValueError):
+                    pass
         if "scale" in self._config:
             try:
                 value = round(float(value) * self._config["scale"], 1)
