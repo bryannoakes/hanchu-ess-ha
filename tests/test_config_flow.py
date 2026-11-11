@@ -54,6 +54,7 @@ def _patched_client(token="tok", devices=None):
     instance.async_get_station_detail = AsyncMock(
         return_value={
             "code": 200,
+            "success": True,
             "data": {
                 "bmsList": [
                     {"sn": "B007EN5811054"},
@@ -667,3 +668,27 @@ async def test_options_flow_offers_grid_export_only_for_model_29(hass: HomeAssis
         )
     assert result2["type"] == FlowResultType.CREATE_ENTRY
     assert entry.options["allow_grid_export"] is True
+
+
+async def test_manual_serial_rejects_an_unsuccessful_station_detail_response(
+    hass: HomeAssistant,
+):
+    patcher, instance = _patched_client(token="tok", devices=[])
+    instance.async_get_station_detail = AsyncMock(
+        return_value={"success": False, "code": 403}
+    )
+    try:
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
+        result2 = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"account": "a", "password": "p"}
+        )
+        result3 = await hass.config_entries.flow.async_configure(
+            result2["flow_id"], {"serial_number": "SN1"}
+        )
+        assert result3["type"] == FlowResultType.FORM
+        assert result3["step_id"] == "manual_serial"
+        assert result3["errors"] == {"base": "battery_lookup_failed"}
+    finally:
+        patcher.stop()
