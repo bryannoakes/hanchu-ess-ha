@@ -627,7 +627,7 @@ class HanchueSensor(CoordinatorEntity, SensorEntity):
         value = self.coordinator.data.get(self._config["key"])
         if value is None and self._config.get("fallback_key"):
             # Fallback field carries no unit sibling and is reported raw.
-            return self.coordinator.data.get(self._config["fallback_key"])
+            return _as_number(self.coordinator.data.get(self._config["fallback_key"]))
         if value is None:
             return None
         if self._config.get("auto_watt"):
@@ -639,11 +639,9 @@ class HanchueSensor(CoordinatorEntity, SensorEntity):
                 # The preferred field reads zero: if the legacy aggregate reports
                 # a load, keep showing it (never hide a load behind a zero).
                 legacy = self.coordinator.data.get(self._config["fallback_key"])
-                try:
-                    if legacy is not None and float(legacy) != 0:
-                        return legacy
-                except (TypeError, ValueError):
-                    pass
+                legacy = _as_number(legacy)
+                if legacy is not None and legacy != 0:
+                    return legacy
         if "scale" in self._config:
             try:
                 value = round(float(value) * self._config["scale"], 1)
@@ -653,6 +651,15 @@ class HanchueSensor(CoordinatorEntity, SensorEntity):
         if derive_mode:
             return _derive_directional_power(value, derive_mode)
         return value
+
+
+def _as_number(value):
+    """Return ``value`` as a finite float, or None if it is not numeric."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if number == number and number not in (float("inf"), float("-inf")) else None
 
 
 class BatterySensor(CoordinatorEntity, SensorEntity):

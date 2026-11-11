@@ -905,3 +905,24 @@ async def test_12k_read_settings_success_discards_pending_edits():
     await HanchuessReadSettingsButton(MagicMock(), entry).async_press()
 
     assert entry.runtime_data.staging.snapshot() == {}
+
+
+def test_load_power_fallback_value_is_numeric_when_the_field_is_a_string():
+    coordinator = MagicMock()
+    coordinator.data = {"loadPwr": "450"}
+    s = HanchueSensor(coordinator, _FakeEntry(), "load_power", SENSORS["load_power"])
+    assert s.native_value == 450.0
+
+
+def test_load_power_zero_rule_returns_numeric_for_a_string_legacy_value():
+    coordinator = MagicMock()
+    coordinator.data = {"loadPwr": "450", "loadEpsPwr": 0.0, "loadEpsPwrUnit": "kW"}
+    s = HanchueSensor(coordinator, _FakeEntry(), "load_power", SENSORS["load_power"])
+    assert s.native_value == 450.0
+
+
+def test_load_power_non_numeric_fallback_is_none():
+    coordinator = MagicMock()
+    coordinator.data = {"loadPwr": "n/a"}
+    s = HanchueSensor(coordinator, _FakeEntry(), "load_power", SENSORS["load_power"])
+    assert s.native_value is None
