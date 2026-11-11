@@ -212,3 +212,24 @@ async def test_device_control_service_registered_with_optional_response():
     ]
     assert len(device_control_calls) == 1
     assert device_control_calls[0].kwargs.get("supports_response") == SupportsResponse.OPTIONAL
+
+
+@pytest.mark.parametrize("dev_type", ["1", "2", "02", "", "3", " 2"])
+async def test_device_control_blocked_for_model_29_whatever_dev_type(dev_type):
+    # The generic /app/ha/iotSet path must be unreachable for model 29 no matter
+    # what dev_type the caller supplies.
+    coordinator = MagicMock()
+    coordinator.client.async_device_control = AsyncMock()
+    entry = _make_entry()
+    entry.runtime_data.inverter_model.code = 29
+
+    with patch(
+        "custom_components.hanchuess._find_realtime_coordinator",
+        return_value=coordinator,
+    ), patch("custom_components.hanchuess._find_entry", return_value=entry):
+        result = await async_device_control_service(
+            MagicMock(), _make_call(dev_type=dev_type)
+        )
+
+    assert result["success"] is False
+    coordinator.client.async_device_control.assert_not_awaited()
