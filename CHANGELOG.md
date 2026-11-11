@@ -18,9 +18,12 @@ later versions are tracked here going forward.
 
 ### Fixed
 - Setup now offers a manual inverter-serial fallback when Hanchu authentication
-  succeeds but `/app/ha/getDeviceList` returns no devices. The supplied serial
-  is validated with `getDeviceStatus`, after which the existing station and
-  automatic battery discovery flow continues unchanged.
+  succeeds but `/app/ha/getDeviceList` returns no devices (for example HTTP 200 with
+  `data: []`). The supplied serial is validated with `getDeviceStatus` and a successful
+  station-detail response, after which the existing station and automatic battery discovery
+  flow continues unchanged. A failed device-list request still shows "cannot connect". Only
+  setups with an inverter were tested; systems without an inverter (battery-only) are not
+  covered by this change.
 
 ## [2.4.0] - 2026-11-11
 

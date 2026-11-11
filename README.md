@@ -214,9 +214,11 @@ The setup flow normally discovers your inverters automatically:
    device.
 3. If Hanchu's device-list API returns no inverters, the integration falls back
    to asking for the **inverter serial number** shown in the Hanchu app or web
-   console. The serial is validated against the inverter status API before the
-   entry is created. Battery packs are still discovered automatically from the
-   station details; their serial numbers do not need to be entered manually.
+   console (this happens when the device-list call succeeds but returns an empty
+   list). The serial is validated against the inverter status API and the station
+   details before the entry is created. Battery packs are still discovered
+   automatically from the station details; their serial numbers do not need to be
+   entered manually. Setups without an inverter are not covered.
 
 Your email address and password are stored with the integration so it can sign
 in again by itself if the Hanchu cloud rejects its session (see
