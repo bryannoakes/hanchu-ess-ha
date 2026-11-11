@@ -208,6 +208,21 @@ def test_load_power_prefers_eps_field_over_zero_load_pwr():
     assert s.native_value == 2020.0
 
 
+def test_load_power_never_hides_a_load_behind_a_zero_eps_field():
+    # If loadEpsPwr reads 0 but loadPwr reports a load, show the load.
+    coordinator = MagicMock()
+    coordinator.data = {"loadPwr": 450.0, "loadEpsPwr": 0.0, "loadEpsPwrUnit": "kW"}
+    s = HanchueSensor(coordinator, _FakeEntry(), "load_power", SENSORS["load_power"])
+    assert s.native_value == 450.0
+
+
+def test_load_power_both_zero_reads_zero():
+    coordinator = MagicMock()
+    coordinator.data = {"loadPwr": 0.0, "loadEpsPwr": 0.0, "loadEpsPwrUnit": "kW"}
+    s = HanchueSensor(coordinator, _FakeEntry(), "load_power", SENSORS["load_power"])
+    assert s.native_value == 0
+
+
 def test_auto_watt_non_numeric_returns_none():
     s = _make_sensor({"key": "batP", "auto_watt": True}, "not-a-number")
     assert s.native_value is None
