@@ -19,8 +19,9 @@ later versions are tracked here going forward.
 ### Fixed
 - Load Power now uses `loadEpsPwr` with its explicit unit and falls back to
   `loadPwr` when `loadEpsPwr` is absent. On the HESS-HY-S-12K-S `loadPwr` can
-  remain zero while `loadEpsPwr` reports the actual backed-house load; on other
-  models the two fields carry the same value.
+  remain zero while `loadEpsPwr` reports the actual backed-house load. Sample
+  responses for models 2 and 4 carry the same value in both fields; other models
+  were not checked.
 
 ## [2.4.0] - 2026-11-11
 
