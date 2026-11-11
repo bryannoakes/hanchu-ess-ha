@@ -16,6 +16,12 @@ later versions are tracked here going forward.
   aiohttp 3.14 requires, so a small shim in `tests/conftest.py` supplies it. Test code only;
   CI (aiohttp 3.13) does not need it and the integration is unchanged.
 
+### Fixed
+- Load Power now uses `loadEpsPwr` with its explicit unit and falls back to
+  `loadPwr` when `loadEpsPwr` is absent. On the HESS-HY-S-12K-S `loadPwr` can
+  remain zero while `loadEpsPwr` reports the actual backed-house load; on other
+  models the two fields carry the same value.
+
 ## [2.4.0] - 2026-11-11
 
 ### Added

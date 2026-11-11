@@ -182,11 +182,27 @@ def test_auto_watt_small_value_misscaled_only_without_unit():
     assert s.native_value == 8000.0
 
 
-def test_load_power_is_raw_watts():
-    # load_power reads loadPwr, which has no `<field>Unit` sibling and is always
-    # reported in watts, so it is surfaced raw (no auto_watt, no misscale).
-    s = _make_sensor(SENSORS["load_power"], 8)
-    assert s.native_value == 8
+def test_load_power_uses_combined_eps_load_with_explicit_unit():
+    # HESS-HY-S-12K-S can report loadPwr=0 while loadEpsPwr carries the actual
+    # backed-house load. Use loadEpsPwr and its explicit unit so the live power
+    # balance matches battery + grid input.
+    s = _make_sensor(SENSORS["load_power"], 903.3, unit="W")
+    assert s.native_value == 903.3
+
+
+def test_load_power_falls_back_to_load_pwr_when_eps_field_absent():
+    # Responses without loadEpsPwr keep the raw watts field.
+    coordinator = MagicMock()
+    coordinator.data = {"loadPwr": 687.3}
+    s = HanchueSensor(coordinator, _FakeEntry(), "load_power", SENSORS["load_power"])
+    assert s.native_value == 687.3
+
+
+def test_load_power_prefers_eps_field_over_zero_load_pwr():
+    coordinator = MagicMock()
+    coordinator.data = {"loadPwr": 0.0, "loadEpsPwr": 2.02, "loadEpsPwrUnit": "kW"}
+    s = HanchueSensor(coordinator, _FakeEntry(), "load_power", SENSORS["load_power"])
+    assert s.native_value == 2020.0
 
 
 def test_auto_watt_non_numeric_returns_none():
