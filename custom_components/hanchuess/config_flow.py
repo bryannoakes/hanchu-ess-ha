@@ -24,6 +24,7 @@ from .const import (
 )
 from .battery import extract_battery_serials
 from .api import HanchuessApiClient
+from .settings_12k import is_12k_s
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -263,30 +264,43 @@ class HanchuessOptionsFlow(OptionsFlowWithReload):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        options = self.config_entry.options
-        data_schema = vol.Schema({
-            vol.Required(
-                CONF_REALTIME_INTERVAL,
-                default=options.get(CONF_REALTIME_INTERVAL, DEFAULT_REALTIME_INTERVAL),
-            ): vol.All(vol.Coerce(int), vol.Range(min=30, max=3600)),
-            vol.Required(
-                CONF_STATISTICS_INTERVAL,
-                default=options.get(CONF_STATISTICS_INTERVAL, DEFAULT_STATISTICS_INTERVAL),
-            ): vol.All(vol.Coerce(int), vol.Range(min=300, max=86400)),
-            vol.Required(
-                CONF_BATTERY_INTERVAL,
-                default=options.get(CONF_BATTERY_INTERVAL, DEFAULT_BATTERY_INTERVAL),
-            ): vol.All(vol.Coerce(int), vol.Range(min=300, max=86400)),
-            vol.Required(
-                CONF_FAST_CHARGE_DURATION,
-                default=options.get(CONF_FAST_CHARGE_DURATION, DEFAULT_FAST_CHARGE_DURATION),
-            ): vol.All(vol.Coerce(int), vol.Range(min=5, max=240)),
+        return self.async_show_form(
+            step_id="init",
+            data_schema=_options_schema(
+                self.config_entry.options, is_12k_s(self.config_entry)
+            ),
+        )
+
+
+def _options_schema(options, model_29: bool) -> vol.Schema:
+    """Options form fields.
+
+    The Inverter Status poll interval is left out for model 29: that poll reads
+    generic keys the model does not answer, so it is never started there.
+    """
+    fields = {
+        vol.Required(
+            CONF_REALTIME_INTERVAL,
+            default=options.get(CONF_REALTIME_INTERVAL, DEFAULT_REALTIME_INTERVAL),
+        ): vol.All(vol.Coerce(int), vol.Range(min=30, max=3600)),
+        vol.Required(
+            CONF_STATISTICS_INTERVAL,
+            default=options.get(CONF_STATISTICS_INTERVAL, DEFAULT_STATISTICS_INTERVAL),
+        ): vol.All(vol.Coerce(int), vol.Range(min=300, max=86400)),
+        vol.Required(
+            CONF_BATTERY_INTERVAL,
+            default=options.get(CONF_BATTERY_INTERVAL, DEFAULT_BATTERY_INTERVAL),
+        ): vol.All(vol.Coerce(int), vol.Range(min=300, max=86400)),
+        vol.Required(
+            CONF_FAST_CHARGE_DURATION,
+            default=options.get(CONF_FAST_CHARGE_DURATION, DEFAULT_FAST_CHARGE_DURATION),
+        ): vol.All(vol.Coerce(int), vol.Range(min=5, max=240)),
+    }
+    if not model_29:
+        fields[
             vol.Required(
                 CONF_SCHEDULE_INTERVAL,
                 default=options.get(CONF_SCHEDULE_INTERVAL, DEFAULT_SCHEDULE_INTERVAL),
-            ): vol.All(
-                vol.Coerce(int), vol.Range(min=MIN_SCHEDULE_INTERVAL, max=3600)
-            ),
-        })
-
-        return self.async_show_form(step_id="init", data_schema=data_schema)
+            )
+        ] = vol.All(vol.Coerce(int), vol.Range(min=MIN_SCHEDULE_INTERVAL, max=3600))
+    return vol.Schema(fields)

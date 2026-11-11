@@ -866,3 +866,12 @@ def test_identified_12k_is_remembered_and_other_models_are_not_persisted():
     assert _resolve_inverter_model(hass, SimpleNamespace(data={}), "4").code == 4
     hass.config_entries.async_update_entry.assert_not_called()
     assert _resolve_inverter_model(hass, SimpleNamespace(data={}), None) is None
+
+
+def test_options_schema_omits_the_schedule_interval_for_model_29_only():
+    from custom_components.hanchuess.config_flow import _options_schema
+
+    generic = {str(k) for k in _options_schema({}, False).schema}
+    model_29 = {str(k) for k in _options_schema({}, True).schema}
+    assert "schedule_interval" in generic
+    assert model_29 == generic - {"schedule_interval"}

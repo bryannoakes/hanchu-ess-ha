@@ -28,7 +28,7 @@ later versions are tracked here going forward.
 - HESS-HY-S-12K-S: a model identified once is remembered, so a status response without
   `devModel` cannot make the inverter look unknown and reopen the generic write paths. The
   Inverter Status sensor's schedule poll is not started for this model (the generic keys it
-  reads are not answered by it).
+  reads are not answered by it) and its poll interval option is not shown.
 
 ### Fixed
 - HESS-HY-S-12K-S read-only settings sensors use the diagnostic entity category
