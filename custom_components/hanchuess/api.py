@@ -34,6 +34,9 @@ class HanchuessApiClient:
         self._refresh_lock = asyncio.Lock()
         self._reauth_triggered = False
         self._last_refresh_attempt = 0
+        # True when the last getDeviceList call failed (as opposed to returning
+        # a genuine empty list); lets the config flow tell the two apart.
+        self.devices_query_failed = False
         self._account: str | None = None
         self._password: str | None = None
 
@@ -173,9 +176,11 @@ class HanchuessApiClient:
             "/gateway/app/ha/getDeviceList", {}
         )
         if result and result.get("success"):
+            self.devices_query_failed = False
             devices = result.get("data", [])
             _LOGGER.info("[HANCHUESS] getDeviceList: %d devices", len(devices))
             return devices
+        self.devices_query_failed = True
         _LOGGER.info("[HANCHUESS] getDeviceList: 0 devices")
         return []
 

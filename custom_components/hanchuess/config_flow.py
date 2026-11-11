@@ -53,9 +53,7 @@ class HanchuessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._account = shared_client._account
             self._password = shared_client._password
             self._devices = await shared_client.async_get_devices()
-            if self._devices:
-                return await self.async_step_select_device()
-            return await self.async_step_manual_serial()
+            return await self._after_device_list()
 
         errors = {}
         if user_input is not None:
@@ -69,12 +67,13 @@ class HanchuessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._account = user_input["account"]
                 self._password = user_input["password"]
                 self._devices = await client.async_get_devices()
-                if self._devices:
-                    return await self.async_step_select_device()
-                return await self.async_step_manual_serial()
+                return await self._after_device_list()
             else:
                 errors["base"] = "auth_failed"
 
+        return self._show_user_form(errors)
+
+    def _show_user_form(self, errors: dict):
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema({
@@ -83,6 +82,19 @@ class HanchuessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             }),
             errors=errors,
         )
+
+    async def _after_device_list(self):
+        """Pick the next step after getDeviceList.
+
+        An empty successful list means the account has no discoverable devices
+        (manual serial entry).  A failed request must not look like that: show
+        the login form with a connection error instead.
+        """
+        if self._devices:
+            return await self.async_step_select_device()
+        if getattr(self._client, "devices_query_failed", False) is True:
+            return self._show_user_form({"base": "cannot_connect"})
+        return await self.async_step_manual_serial()
 
     def _credentials(self) -> dict:
         """Credentials to store with the entry, so a rejected refresh can re-login."""

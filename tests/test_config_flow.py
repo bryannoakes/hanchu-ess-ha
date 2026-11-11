@@ -142,6 +142,24 @@ async def test_user_flow_no_devices_offers_manual_serial(hass: HomeAssistant):
         patcher.stop()
 
 
+async def test_user_flow_failed_device_list_is_a_connection_error(hass: HomeAssistant):
+    # A failed getDeviceList must not look like "no devices": no manual serial form.
+    patcher, instance = _patched_client(token="tok", devices=[])
+    instance.devices_query_failed = True
+    try:
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
+        result2 = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"account": "a", "password": "p"}
+        )
+        assert result2["type"] == FlowResultType.FORM
+        assert result2["step_id"] == "user"
+        assert result2["errors"] == {"base": "cannot_connect"}
+    finally:
+        patcher.stop()
+
+
 async def test_manual_serial_flow_creates_entry_and_discovers_batteries(
     hass: HomeAssistant,
 ):
