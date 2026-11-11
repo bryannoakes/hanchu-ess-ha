@@ -10,6 +10,12 @@ later versions are tracked here going forward.
 
 ## [Unreleased]
 
+### Tests
+- Mocked-API tests work with aiohttp 3.14 (the version Home Assistant 2026.11 pins):
+  `aioresponses` 0.7.9 builds `ClientResponse` without the `stream_writer` argument that
+  aiohttp 3.14 requires, so a small shim in `tests/conftest.py` supplies it. Test code only;
+  CI (aiohttp 3.13) does not need it and the integration is unchanged.
+
 ## [2.4.0] - 2026-11-11
 
 ### Added
