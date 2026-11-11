@@ -19,6 +19,10 @@ class ReauthRequired(Exception):
     """Raised when refresh_token returns 90076, requiring re-authentication."""
 
 
+class TokenExpired(Exception):
+    """Raised by platform settings reads (opt-in) when the cloud answers 401."""
+
+
 class HanchuessApiClient:
     """Hanchuess API client."""
 
@@ -265,8 +269,12 @@ class HanchuessApiClient:
         dev_type: str,
         keys: list,
         language: str = "en",
+        raise_on_expired: bool = False,
     ) -> dict:
         """Read encrypted platform settings with the existing HA-scoped token.
+
+        With raise_on_expired=True a 401 raises TokenExpired so the caller can
+        refresh and retry; the default keeps the historical "empty dict" result.
 
         HESS-HY-S-12K-S/model 29 returns code 100 / data 900001 from the
         dedicated /app/ha/iotGet endpoint, while the same HA token succeeds
@@ -280,6 +288,8 @@ class HanchuessApiClient:
             send_as_json=False,
             extra_headers={"Content-Type": "text/plain", "version": "1.0"},
         )
+        if result and result.get("code") == 401 and raise_on_expired:
+            raise TokenExpired()
         if result and result.get("success"):
             return result.get("data", {})
         _LOGGER.warning(

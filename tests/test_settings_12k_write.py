@@ -29,6 +29,7 @@ def _mock_ha_session(monkeypatch):
 
 
 PLATFORM_IOT_SET = f"{BASE_URL}/gateway/platform/deviceNew/iotSet"
+PLATFORM_IOT_GET = f"{BASE_URL}/gateway/platform/deviceNew/iotGet"
 OK = {
     "code": 200, "success": True, "msg": "Success!",
     "data": {"taskId": "T", "failCount": 0, "successCount": 1,
@@ -105,6 +106,61 @@ async def test_write_not_confirmed_raises_and_keeps_old_value():
     with pytest.raises(HomeAssistantError, match="did not confirm"):
         await coord.async_write_setting("chgSocLmt", 97, attempts=3, delay=0)
     assert coord.data["chgSocLmt"] == "98"
+
+
+def _with_refresh(coord, client, refreshed=True):
+    from types import SimpleNamespace
+
+    client.async_refresh_token = AsyncMock(return_value="new" if refreshed else None)
+    client._reauth_triggered = False
+    coord.hass = SimpleNamespace(
+        config_entries=SimpleNamespace(
+            async_entries=lambda domain: [], async_update_entry=MagicMock()
+        )
+    )
+
+
+async def test_write_refreshes_token_once_on_401_and_retries():
+    coord, client = _coordinator(
+        {"success": False, "msg": "token_expired"}, [{"chgSocLmt": "97"}]
+    )
+    client.async_platform_iot_set = AsyncMock(
+        side_effect=[{"success": False, "msg": "token_expired"}, {"success": True}]
+    )
+    _with_refresh(coord, client)
+    assert await coord.async_write_setting("chgSocLmt", 97, delay=0) == 97
+    assert client.async_platform_iot_set.await_count == 2
+    client.async_refresh_token.assert_awaited_once_with(force=True)
+
+
+async def test_write_read_back_refreshes_on_expired_token():
+    from custom_components.hanchuess.api import TokenExpired
+
+    coord, client = _coordinator({"success": True}, [TokenExpired(), {"chgSocLmt": "97"}])
+    _with_refresh(coord, client)
+    assert await coord.async_write_setting("chgSocLmt", 97, delay=0) == 97
+    client.async_refresh_token.assert_awaited_once_with(force=True)
+
+
+async def test_write_fails_cleanly_when_refresh_fails_twice():
+    coord, client = _coordinator({"success": False, "msg": "token_expired"}, [])
+    _with_refresh(coord, client, refreshed=False)
+    client._reauth_triggered = True  # reauth already raised once -> UpdateFailed
+    with pytest.raises(HomeAssistantError):
+        await coord.async_write_setting("chgSocLmt", 97, delay=0)
+
+
+async def test_platform_iot_get_raises_token_expired_only_when_asked(hass):
+    from custom_components.hanchuess.api import TokenExpired
+
+    client = HanchuessApiClient(hass, BASE_URL, token="t")
+    with aioresponses() as m:
+        m.post(PLATFORM_IOT_GET, payload={"code": 401, "success": False})
+        with pytest.raises(TokenExpired):
+            await client.async_platform_iot_get("SN1", "2", ["chgSocLmt"], raise_on_expired=True)
+    with aioresponses() as m:
+        m.post(PLATFORM_IOT_GET, payload={"code": 401, "success": False})
+        assert await client.async_platform_iot_get("SN1", "2", ["chgSocLmt"]) == {}
 
 
 async def test_rejected_write_raises_without_readback():

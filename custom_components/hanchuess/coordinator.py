@@ -10,7 +10,7 @@ from homeassistant.helpers.update_coordinator import (
     UpdateFailed,
 )
 from homeassistant.exceptions import ConfigEntryAuthFailed
-from .api import HanchuessApiClient, ReauthRequired
+from .api import HanchuessApiClient, ReauthRequired, TokenExpired
 from .settings_12k import PLATFORM_SETTING_KEYS
 from .const import (
     DOMAIN,
@@ -180,11 +180,8 @@ class HanchuessSettingsCoordinator(TimestampDataUpdateCoordinator):
         inverter_serial_number = self.entry.data["sn"]
         language = self.hass.config.language or "en"
 
-        data = await self.client.async_platform_iot_get(
-            inverter_serial_number,
-            "2",
-            PLATFORM_SETTING_KEYS,
-            language=language,
+        data = await self._platform_get(
+            inverter_serial_number, PLATFORM_SETTING_KEYS, language=language
         )
         if not data:
             raise UpdateFailed("Failed to get model-29 settings")
@@ -195,6 +192,37 @@ class HanchuessSettingsCoordinator(TimestampDataUpdateCoordinator):
         )
         return data
 
+
+    def _update_entry_token(self, token: str):
+        for entry in self.hass.config_entries.async_entries(DOMAIN):
+            self.hass.config_entries.async_update_entry(
+                entry, data={**entry.data, "token": token}
+            )
+
+    async def _refresh_or_fail(self) -> None:
+        """Force a token refresh after a 401, or raise the usual auth errors."""
+        if not await _try_refresh(self.client, self._update_entry_token, force=True):
+            _raise_auth_failed(self.client, "Token expired and refresh failed")
+
+    async def _platform_get(self, sn: str, keys: list, language: str = "en") -> dict:
+        """Read platform settings, refreshing the token once on a 401."""
+        try:
+            return await self.client.async_platform_iot_get(
+                sn, "2", keys, language=language, raise_on_expired=True
+            )
+        except TokenExpired:
+            await self._refresh_or_fail()
+            return await self.client.async_platform_iot_get(
+                sn, "2", keys, language=language
+            )
+
+    async def _platform_set(self, sn: str, value: dict) -> dict:
+        """Write platform settings, refreshing the token once on a 401."""
+        result = await self.client.async_platform_iot_set(sn, "2", value)
+        if result.get("msg") == "token_expired":
+            await self._refresh_or_fail()
+            result = await self.client.async_platform_iot_set(sn, "2", value)
+        return result
 
     @property
     def allow_grid_export(self) -> bool:
@@ -239,7 +267,10 @@ class HanchuessSettingsCoordinator(TimestampDataUpdateCoordinator):
         except SettingWriteError as err:
             raise HomeAssistantError(str(err)) from err
         sn = self.entry.data["sn"]
-        result = await self.client.async_platform_iot_set(sn, "2", {key: number})
+        try:
+            result = await self._platform_set(sn, {key: number})
+        except UpdateFailed as err:  # repeat auth failure; keep the flush contract
+            raise HomeAssistantError(str(err)) from err
         if not result.get("success"):
             raise HomeAssistantError(
                 f"Hanchu rejected {key} write: {result.get('msg', 'unknown error')}"
@@ -247,7 +278,10 @@ class HanchuessSettingsCoordinator(TimestampDataUpdateCoordinator):
         for attempt in range(attempts):
             if attempt:
                 await asyncio.sleep(delay)
-            read = await self.client.async_platform_iot_get(sn, "2", [key])
+            try:
+                read = await self._platform_get(sn, [key])
+            except UpdateFailed as err:
+                raise HomeAssistantError(str(err)) from err
             if _same(read.get(key), number):
                 self.async_set_updated_data({**(self.data or {}), key: str(number)})
                 return number
