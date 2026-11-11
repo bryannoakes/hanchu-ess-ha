@@ -68,6 +68,29 @@ later versions are tracked here going forward.
   HESS-HY-S-12K-S, `loadPwr` can remain zero while `loadEpsPwr` reports the
   actual backed-house load; this previously made Home Assistant show 0 W load.
 
+### Documentation
+- Inverter status recipe: added a variant for systems controlled by
+  Predbat's built-in Hanchu ESS integration, which uses `predbat.status` for
+  the Scheduled Charge / Scheduled Discharge statuses, because Predbat's slot
+  writes aren't reflected in this integration's slot time entities.
+
+## [2.3.1] - 2026-11-10
+
+### Fixed
+- The **Hanchuess Remote Settings** card failed to load on Home Assistant
+  2026.11, where the built-in Marketplace replaced HACS and took over the
+  `/hacsfiles` URLs the card was served from. The card is now served from the
+  integration's own path (`/hanchuess_card/`), and the existing dashboard
+  resource is updated automatically on startup. A version number in the URL
+  makes browsers load the new card after each update. If your dashboard
+  resources are managed in YAML, change the card's URL to
+  `/hanchuess_card/hanchuess-energy-card.js`.
+
+### Documentation
+- Added an [inverter status sensor recipe](docs/inverter-status.md)
+  (Fast Charging / Scheduled Charge / Charging / Idle, etc.) built from
+  helpers, template sensors and an automation. Contributed by @lancedfr (#33).
+
 ## [2.3.0] - 2026-11-04
 
 ### Changed
@@ -483,7 +506,8 @@ act on it straight away must now call `hanchuess.write_settings` after the write
 - Initial fork of the original integration with read-only battery, grid, PV, and
   load sensors and the custom Lovelace card.
 
-[Unreleased]: https://github.com/upton68/hanchu-ess-ha/compare/v2.3.0...HEAD
+[Unreleased]: https://github.com/upton68/hanchu-ess-ha/compare/v2.3.1...HEAD
+[2.3.1]: https://github.com/upton68/hanchu-ess-ha/compare/v2.3.0...v2.3.1
 [2.3.0]: https://github.com/upton68/hanchu-ess-ha/compare/v2.2.2...v2.3.0
 [2.2.2]: https://github.com/upton68/hanchu-ess-ha/compare/v2.2.1...v2.2.2
 [2.2.1]: https://github.com/upton68/hanchu-ess-ha/compare/v2.2.0...v2.2.1
