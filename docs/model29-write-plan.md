@@ -43,18 +43,23 @@ Slot 2/3 entities are disabled by default in the entity registry. Every live tes
 
 1. Entities validate the value and stage it in the shared `SettingsStagingBuffer` (the same layer the other models
    use). The entity shows the pending value and a `pending_write` attribute; the cloud is not touched yet.
-2. Write Settings / `hanchuess.write_settings` calls `HanchuessSettingsCoordinator.async_write_staged` under a lock, so
-   two flushes never overlap. The whole snapshot is validated first. Keys are then written in a safe order
-   (`plan_write_order`): schedule disables first, then ordinary keys and schedule parameters, then schedule enables last.
-   An enable (`timedChargeEnable` / `timedDischargeEnable` = 1) is not written if any staged parameter of that schedule
-   was invalid or failed to confirm.
+2. Write Settings / `hanchuess.write_settings` calls `HanchuessSettingsCoordinator.async_write_staged` under a lock
+   shared with Read Settings and the staging clear, so none of them interleave. The whole snapshot is validated first;
+   if any staged value is invalid nothing is sent. A schedule that is currently enabled (read live) is disabled and
+   confirmed before any of its parameters change, and re-enabled only after every staged parameter confirmed; if one
+   fails it is left disabled and the re-enable is staged. Keys are written in a safe order (`plan_write_order`):
+   schedule disables first, then ordinary keys and schedule parameters, then schedule enables last. An enable
+   (`timedChargeEnable` / `timedDischargeEnable` = 1) is not written if any staged parameter of that schedule failed.
 3. For each key: `iotSet`, then poll `iotGet` (up to 6 x 3 s) until the value matches exactly (`"97.9"` does not confirm
    97). Confirmed keys leave staging unless the user staged a newer value meanwhile. Unconfirmed or rejected keys stay
    staged and a persistent notification lists them.
-4. On a 401 the token is refreshed once and the call retried; if the retry is also rejected it surfaces as an
-   authentication error (reads) or a write error (writes), without a second refresh.
-5. Read Settings re-reads and, only if the read succeeded, discards staged edits (same as the other models). A failed
-   read keeps them.
+4. On a 401 the token is refreshed once and the call retried; if the retry is also rejected it is an authentication
+   error without a second refresh (reads raise the usual auth failure; writes stop the flush and start reauthentication).
+5. Read Settings waits for any flush, re-reads, and on success discards only the staged edits whose key was actually
+   returned (and not changed meanwhile). A failed or partial read keeps the rest.
+6. The export gate fails closed: only the literal boolean `True` opens it.
+7. A 12K-S identified once is remembered (`dev_model` in the config entry), so a status response that omits `devModel`
+   cannot make it look like an unknown model and re-open the generic write paths.
 
 ## Grid export is an opt-in
 

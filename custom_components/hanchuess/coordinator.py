@@ -10,7 +10,7 @@ from homeassistant.helpers.update_coordinator import (
     TimestampDataUpdateCoordinator,
     UpdateFailed,
 )
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from .api import HanchuessApiClient, ReauthRequired, TokenExpired
 from .settings_12k import PLATFORM_SETTING_KEYS
 from .const import (
@@ -163,6 +163,18 @@ def _same(raw, sent) -> bool:
     return number.is_integer() and int(number) == sent
 
 
+def _is_on(value) -> bool:
+    """True for a device on/off value that means "on" (1, "1", "1.0", True)."""
+    try:
+        return float(value) == 1
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+class WriteAuthError(HomeAssistantError):
+    """A settings write could not authenticate; the flush must stop."""
+
+
 class HanchuessSettingsCoordinator(TimestampDataUpdateCoordinator):
     """On-demand model-29 settings coordinator.
 
@@ -228,12 +240,23 @@ class HanchuessSettingsCoordinator(TimestampDataUpdateCoordinator):
         if result.get("msg") == "token_expired":
             await self._refresh_or_fail()
             result = await self.client.async_platform_iot_set(sn, "2", value)
+            if result.get("msg") == "token_expired":
+                # Refreshed once already: do not refresh again, ask for reauth.
+                self._start_reauth()
+                raise WriteAuthError(
+                    "Token still rejected after refresh; re-authentication required"
+                )
         return result
+
+    def _start_reauth(self) -> None:
+        start = getattr(self.entry, "async_start_reauth", None)
+        if start is not None:
+            start(getattr(self, "hass", None))
 
     @property
     def allow_grid_export(self) -> bool:
         """True only when the user opted in to export-capable options."""
-        return bool(self.entry.options.get("allow_grid_export", False))
+        return self.entry.options.get("allow_grid_export", False) is True
 
     @property
     def _write_lock(self) -> asyncio.Lock:
@@ -245,31 +268,81 @@ class HanchuessSettingsCoordinator(TimestampDataUpdateCoordinator):
     async def async_write_staged(self, staging) -> dict[str, str]:
         """Write every staged key through the guarded writer, one key at a time.
 
-        The whole snapshot is validated first, then written in a safe order
-        (schedule disables first, schedule enables last and only if every staged
-        parameter of that schedule was confirmed).  Each key is confirmed by
-        read-back.  Confirmed keys leave the staging buffer unless the user
-        staged a newer value meanwhile; failed keys stay staged.  Concurrent
-        flushes are serialised.  Returns {key: error}.
+        Under the write lock: the whole snapshot is validated first and nothing
+        is sent if any staged value is invalid.  A schedule that is currently
+        enabled is disabled before its parameters change and re-enabled only
+        after every staged parameter is confirmed (otherwise it is left
+        disabled and the re-enable is staged).  Order: schedule disables, then
+        ordinary keys and schedule parameters, then schedule enables.  Each
+        key is confirmed by read-back.  Confirmed keys leave the staging buffer
+        unless the user staged a newer value meanwhile; failed keys stay
+        staged.  An authentication failure stops the flush.  Returns
+        {key: error}.
         """
-        from homeassistant.exceptions import HomeAssistantError
-
-        from .settings_12k import SettingWriteError, plan_write_order, validate_setting_write
+        from .settings_12k import (
+            SCHEDULE_ENABLE,
+            SettingWriteError,
+            plan_write_order,
+            validate_setting_write,
+        )
 
         async with self._write_lock:
             snapshot = staging.snapshot()
             errors: dict[str, str] = {}
-            valid: dict[str, object] = {}
             for key, value in snapshot.items():
                 try:
                     validate_setting_write(key, value, allow_export=self.allow_grid_export)
                 except SettingWriteError as err:
                     errors[key] = str(err)
-                else:
-                    valid[key] = value
-            for key, group_keys in plan_write_order(snapshot):
-                value = snapshot[key]
+            if errors:
+                # All or nothing at preflight: send nothing.
+                for key in snapshot:
+                    errors.setdefault(key, "not written: another staged change is invalid")
+                self.async_update_listeners()
+                return errors
+
+            sn = self.entry.data["sn"]
+            effective = dict(snapshot)
+            reenabled: set[str] = set()
+            for enable, pattern in SCHEDULE_ENABLE.items():
+                params = [k for k in snapshot if k != enable and pattern.match(k)]
+                if not params:
+                    continue
+                if enable in snapshot and not _is_on(snapshot[enable]):
+                    continue  # being turned off: the planner disables it first
+                try:
+                    live = (await self._platform_get(sn, [enable])).get(enable)
+                    read_error = "no value returned"
+                except (UpdateFailed, ConfigEntryAuthFailed) as err:
+                    self._start_reauth()
+                    live, read_error = None, str(err)
+                if live is None:
+                    for key in params:
+                        errors[key] = f"not written: could not read current {enable} ({read_error})"
+                    continue
+                if not _is_on(live):
+                    continue  # currently off: a staged enable is written last
+                try:
+                    await self.async_write_setting(enable, 0)
+                except WriteAuthError as err:
+                    for key in snapshot:
+                        errors[key] = f"not written: {err}"
+                    self.async_update_listeners()
+                    return errors
+                except HomeAssistantError as err:
+                    for key in params:
+                        errors[key] = f"not written: {enable} could not be disabled first ({err})"
+                    continue
+                effective[enable] = 1  # re-enable last
+                reenabled.add(enable)
+
+            aborted = False
+            for key, group_keys in plan_write_order(effective):
+                value = effective[key]
                 if key in errors:
+                    continue
+                if aborted:
+                    errors[key] = "not written: authentication failed"
                     continue
                 blocked = [k for k in group_keys if k in errors]
                 if blocked:
@@ -277,12 +350,46 @@ class HanchuessSettingsCoordinator(TimestampDataUpdateCoordinator):
                     continue
                 try:
                     await self.async_write_setting(key, value)
+                except WriteAuthError as err:
+                    errors[key] = str(err)
+                    aborted = True
                 except HomeAssistantError as err:
                     errors[key] = str(err)
                 else:
                     staging.discard_if_value(key, value)
+
+            for enable in reenabled:
+                if enable in errors:
+                    errors[enable] = f"schedule left DISABLED ({errors[enable]})"
+                    if enable not in snapshot:
+                        staging.stage(enable, 1)  # shown as pending; next flush re-enables
             self.async_update_listeners()  # entities drop their pending marker
             return errors
+
+    async def async_refresh_settings(self, staging) -> bool:
+        """Read settings from the device (Read Settings), waiting for any flush.
+
+        Pending edits are dropped only for keys that were actually re-read, and
+        only if they were not changed while the read ran.  Returns False (and
+        keeps every edit) when the read failed.
+        """
+        async with self._write_lock:
+            before = staging.snapshot()
+            await self.async_refresh()
+            if not self.last_update_success:
+                return False
+            fetched = self.data or {}
+            for key, value in before.items():
+                if key in fetched:
+                    staging.discard_if_value(key, value)
+            self.async_update_listeners()
+            return True
+
+    async def async_clear_staged(self, staging) -> None:
+        """Discard all pending edits, waiting for any flush in progress."""
+        async with self._write_lock:
+            staging.clear()
+            self.async_update_listeners()
 
     async def async_write_setting(
         self, key: str, value, *, attempts: int = 6, delay: float = 3.0
@@ -305,8 +412,9 @@ class HanchuessSettingsCoordinator(TimestampDataUpdateCoordinator):
         sn = self.entry.data["sn"]
         try:
             result = await self._platform_set(sn, {key: number})
-        except UpdateFailed as err:  # repeat auth failure; keep the flush contract
-            raise HomeAssistantError(str(err)) from err
+        except (UpdateFailed, ConfigEntryAuthFailed) as err:  # repeat auth failure
+            self._start_reauth()
+            raise WriteAuthError(str(err)) from err
         if not result.get("success"):
             raise HomeAssistantError(
                 f"Hanchu rejected {key} write: {result.get('msg', 'unknown error')}"
@@ -316,8 +424,9 @@ class HanchuessSettingsCoordinator(TimestampDataUpdateCoordinator):
                 await asyncio.sleep(delay)
             try:
                 read = await self._platform_get(sn, [key])
-            except UpdateFailed as err:
-                raise HomeAssistantError(str(err)) from err
+            except (UpdateFailed, ConfigEntryAuthFailed) as err:
+                self._start_reauth()
+                raise WriteAuthError(str(err)) from err
             if _same(read.get(key), number):
                 self.async_set_updated_data({**(self.data or {}), key: str(number)})
                 return number

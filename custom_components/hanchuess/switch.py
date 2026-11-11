@@ -30,8 +30,8 @@ async def async_setup_entry(
 ):
     if is_12k_s(entry):
         _LOGGER.info(
-            "[HANCHUESS] Fast charge/discharge controls disabled for HESS-HY-S-12K-S "
-            "during read-only model validation"
+            "[HANCHUESS] Fast charge/discharge controls are not supported for "
+            "HESS-HY-S-12K-S"
         )
         settings = entry.runtime_data.settings
         if settings is not None:

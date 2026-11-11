@@ -86,6 +86,28 @@ def _find_entry(hass: HomeAssistant, sn: str | None = None):
     return None
 
 
+def _resolve_inverter_model(hass, entry, dev_model):
+    """Identify the model from the status ``devModel``.
+
+    A status response that omits ``devModel`` must not make a known
+    HESS-HY-S-12K-S look unrecognised (that would re-enable the generic write
+    paths), so a 12K-S identified earlier is remembered in the config entry
+    and used when the code is absent.
+    """
+    if dev_model in (None, ""):
+        dev_model = entry.data.get("dev_model")
+    model = lookup_inverter_model(dev_model)
+    if (
+        model is not None
+        and model.code == MODEL_12K_CODE
+        and entry.data.get("dev_model") != model.code
+    ):
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, "dev_model": model.code}
+        )
+    return model
+
+
 async def _async_flush_staged_model_29(hass: HomeAssistant, entry) -> bool:
     """Flush staged model-29 settings through the guarded, read-back-confirmed writer."""
     staging = entry.runtime_data.staging
@@ -382,7 +404,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             and entry.runtime_data.inverter_model.code == MODEL_12K_CODE
         ):
             _LOGGER.error(
-                "[HANCHUESS] fast_charge blocked for HESS-HY-S-12K-S during read-only validation"
+                "[HANCHUESS] fast_charge blocked for HESS-HY-S-12K-S"
             )
             return
 
@@ -565,7 +587,7 @@ async def ws_fast_charge(hass, connection, msg):
         connection.send_error(
             msg["id"],
             "unsupported_model_write",
-            "Fast charge/discharge is disabled for HESS-HY-S-12K-S during read-only validation",
+            "Fast charge/discharge is not supported for HESS-HY-S-12K-S",
         )
         return
 
@@ -596,10 +618,12 @@ async def ws_clear_staging(hass, connection, msg):
             msg["id"], "not_found", f"Device {inverter_serial_number} not found"
         )
         return
-    entry.runtime_data.staging.clear()
     settings = entry.runtime_data.settings
     if settings is not None:
-        settings.async_update_listeners()  # entities drop their pending display
+        # Waits for any flush in progress, then clears and refreshes entities.
+        await settings.async_clear_staged(entry.runtime_data.staging)
+    else:
+        entry.runtime_data.staging.clear()
     _LOGGER.debug("[HANCHUESS] Staging buffer cleared via WS for %s", inverter_serial_number)
     connection.send_result(msg["id"], {})
 
@@ -709,7 +733,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: HanchuessConfigEntry) ->
     # 3 kW to 10 kW alike), so where the model table knows the battery
     # maximum it overrides the menu. Unknown codes keep the menu values.
     dev_model = (coordinator.data or {}).get("devModel")
-    inverter_model = lookup_inverter_model(dev_model)
+    inverter_model = _resolve_inverter_model(hass, entry, dev_model)
     if inverter_model is None:
         _LOGGER.info(
             "[HANCHUESS] Inverter model not recognised (devModel=%r); "

@@ -233,3 +233,16 @@ async def test_diagnostics_reports_unrecognised_dev_model():
     )
     diag = await async_get_config_entry_diagnostics(MagicMock(), entry)
     assert diag["inverter_model"] == {"dev_model": "99", "name": None}
+
+
+async def test_status_link_is_redacted_from_diagnostics():
+    entry = _FakeEntry()
+    entry.runtime_data = _make_runtime_data(
+        realtime=SimpleNamespace(data={"wkLink": "https://example.invalid/?sn=SN123", "batSoc": 55}),
+    )
+
+    diag = await async_get_config_entry_diagnostics(MagicMock(), entry)
+
+    assert diag["device_status"]["wkLink"] == REDACTED
+    assert diag["device_status"]["batSoc"] == 55
+    assert "SN123" not in repr(diag["device_status"])

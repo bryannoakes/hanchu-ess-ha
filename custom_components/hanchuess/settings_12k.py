@@ -249,7 +249,7 @@ def allowed_options(key: str, allow_export: bool = False) -> dict[int, str]:
     Options that allow grid export are only included when the user has opted in
     (config-entry option ``allow_grid_export``, default off).
     """
-    refused = set() if allow_export else GRID_EXPORT_REFUSED.get(key, set())
+    refused = set() if allow_export is True else GRID_EXPORT_REFUSED.get(key, set())
     return {v: n for v, n in ENUM_OPTIONS.get(key, {}).items() if v not in refused}
 
 
@@ -300,7 +300,7 @@ def validate_setting_write(key: str, value, allow_export: bool = False):
             raise SettingWriteError(f"{key}: must be 0 or 1")
         return number
     if kind == "enum":
-        if not allow_export and number in GRID_EXPORT_REFUSED.get(key, set()):
+        if allow_export is not True and number in GRID_EXPORT_REFUSED.get(key, set()):
             raise SettingWriteError(
                 f"{key}={number} is refused: it allows grid export, which is disabled "
                 "(enable \"Allow grid export settings\" in the integration options)"
@@ -325,6 +325,9 @@ _SCHEDULE_ENABLE = {
         r"|^timePeriod\d(StopDischargingSoc|StopDischargingV|MaxDisChgPwr)$"
     ),
 }
+
+
+SCHEDULE_ENABLE = _SCHEDULE_ENABLE
 
 
 def plan_write_order(snapshot: dict) -> list[tuple[str, list[str]]]:

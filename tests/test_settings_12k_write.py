@@ -471,8 +471,8 @@ def test_plan_write_order_puts_disable_first_enable_last():
     assert set(deps) == {"startChgTime1", "timePeriod1MaxChgPwr"}  # charge params only
 
 
-def _fake_device(client, fail=()):
-    device, order = {}, []
+def _fake_device(client, fail=(), initial=None):
+    device, order = dict(initial or {}), []
 
     async def iot_set(sn, dev_type, value):
         ((key, val),) = value.items()
@@ -493,7 +493,7 @@ async def test_flush_writes_schedule_parameters_before_enabling():
     from custom_components.hanchuess.staging import SettingsStagingBuffer
 
     coord, client = _coordinator({"success": True}, [])
-    _, order = _fake_device(client)
+    _, order = _fake_device(client, initial={"timedChargeEnable": "0"})
     staging = SettingsStagingBuffer()
     staging.stage("timedChargeEnable", 1)  # staged first on purpose
     staging.stage("startChgTime1", "0300")
@@ -508,7 +508,7 @@ async def test_flush_does_not_enable_schedule_when_a_parameter_fails():
     from custom_components.hanchuess.staging import SettingsStagingBuffer
 
     coord, client = _coordinator({"success": True}, [])
-    _, order = _fake_device(client, fail={"startChgTime1"})
+    _, order = _fake_device(client, fail={"startChgTime1"}, initial={"timedChargeEnable": "0"})
     staging = SettingsStagingBuffer()
     staging.stage("startChgTime1", "0300")
     staging.stage("timePeriod1MaxChgPwr", 4000)
@@ -586,10 +586,11 @@ async def test_second_401_on_write_is_reported_without_a_second_refresh():
         return_value={"success": False, "msg": "token_expired"}
     )
     _with_refresh(coord, client)
-    with pytest.raises(HomeAssistantError, match="token_expired"):
+    with pytest.raises(HomeAssistantError, match="re-authentication"):
         await coord.async_write_setting("chgSocLmt", 97, delay=0)
     assert client.async_platform_iot_set.await_count == 2
     client.async_refresh_token.assert_awaited_once_with(force=True)
+    coord.entry.async_start_reauth.assert_called_once()
 
 
 async def test_second_401_on_read_back_is_an_auth_error_not_a_readback_failure():
@@ -602,3 +603,231 @@ async def test_second_401_on_read_back_is_an_auth_error_not_a_readback_failure()
     assert "did not confirm" not in str(err.value)
     client.async_refresh_token.assert_awaited_once_with(force=True)
     assert client.async_platform_iot_get.await_count == 2
+
+
+# --- Round 2 review regressions -------------------------------------------
+
+
+@pytest.mark.parametrize("option", ["false", "true", "yes", 1, 0, None, [], "1"])
+def test_export_gate_fails_closed_for_non_boolean_options(option):
+    coord, _ = _coordinator({"success": True}, [])
+    coord.entry.options = {"allow_grid_export": option}
+    assert coord.allow_grid_export is False
+
+
+def test_export_gate_opens_only_for_literal_true():
+    coord, _ = _coordinator({"success": True}, [])
+    coord.entry.options = {"allow_grid_export": True}
+    assert coord.allow_grid_export is True
+
+
+@pytest.mark.parametrize("flag", ["false", "true", 1, "yes", None])
+def test_validator_and_options_fail_closed_on_non_boolean_flag(flag):
+    from custom_components.hanchuess.settings_12k import allowed_options
+
+    with pytest.raises(SettingWriteError):
+        validate_setting_write("workMode", 1, allow_export=flag)
+    assert 1 not in allowed_options("workMode", flag)
+
+
+async def test_flush_disables_an_enabled_schedule_before_changing_its_parameters():
+    from custom_components.hanchuess.staging import SettingsStagingBuffer
+
+    coord, client = _coordinator({"success": True}, [])
+    device, order = _fake_device(client, initial={"timedDischargeEnable": "1"})
+    staging = SettingsStagingBuffer()
+    staging.stage("startDischgTime1", "1400")
+    staging.stage("endDischgTime1", "1700")
+    assert await coord.async_write_staged(staging) == {}
+    assert order == ["timedDischargeEnable", "startDischgTime1", "endDischgTime1", "timedDischargeEnable"]
+    assert device["timedDischargeEnable"] == 1  # re-enabled last
+    assert staging.count == 0
+
+
+async def test_enabled_schedule_stays_disabled_and_reenable_is_staged_when_a_parameter_fails():
+    from unittest.mock import patch
+
+    from custom_components.hanchuess.staging import SettingsStagingBuffer
+
+    coord, client = _coordinator({"success": True}, [])
+    device, order = _fake_device(
+        client, fail={"endDischgTime1"}, initial={"timedDischargeEnable": "1"}
+    )
+    staging = SettingsStagingBuffer()
+    staging.stage("startDischgTime1", "1400")
+    staging.stage("endDischgTime1", "1700")
+    with patch("custom_components.hanchuess.coordinator.asyncio.sleep", new=AsyncMock()):
+        errors = await coord.async_write_staged(staging)
+    assert order == ["timedDischargeEnable", "startDischgTime1", "endDischgTime1"]
+    assert device["timedDischargeEnable"] == 0  # never left running on mixed parameters
+    assert "schedule left DISABLED" in errors["timedDischargeEnable"]
+    assert staging.snapshot() == {"endDischgTime1": "1700", "timedDischargeEnable": 1}
+
+
+async def test_enabled_schedule_is_untouched_when_its_state_cannot_be_read():
+    from custom_components.hanchuess.staging import SettingsStagingBuffer
+
+    coord, client = _coordinator({"success": True}, [])
+    device, order = _fake_device(client)  # device reports no enable value
+    staging = SettingsStagingBuffer()
+    staging.stage("startDischgTime1", "1400")
+    errors = await coord.async_write_staged(staging)
+    assert order == []
+    assert "could not read current timedDischargeEnable" in errors["startDischgTime1"]
+
+
+async def test_flush_sends_nothing_when_any_staged_value_is_invalid():
+    from custom_components.hanchuess.staging import SettingsStagingBuffer
+
+    coord, client = _coordinator({"success": True}, [])
+    _, order = _fake_device(client)
+    staging = SettingsStagingBuffer()
+    staging.stage("timePeriod1StopChargingSoc", 101)  # invalid
+    staging.stage("timePeriod1MaxChgPwr", 6000)
+    staging.stage("gridCharging", 1)
+    errors = await coord.async_write_staged(staging)
+    assert order == []
+    assert set(errors) == {"timePeriod1StopChargingSoc", "timePeriod1MaxChgPwr", "gridCharging"}
+    assert staging.count == 3
+
+
+async def test_second_401_during_a_flush_stops_the_flush_and_asks_for_reauth():
+    from custom_components.hanchuess.staging import SettingsStagingBuffer
+
+    coord, client = _coordinator({"success": True}, [])
+    _with_refresh(coord, client)
+    client.async_platform_iot_set = AsyncMock(
+        return_value={"success": False, "msg": "token_expired"}
+    )
+    staging = SettingsStagingBuffer()
+    staging.stage("chgSocLmt", 97)
+    staging.stage("gridCharging", 1)
+    errors = await coord.async_write_staged(staging)
+    assert set(errors) == {"chgSocLmt", "gridCharging"}
+    assert "authentication failed" in errors["gridCharging"] or "re-authentication" in errors["gridCharging"]
+    assert client.async_platform_iot_set.await_count == 2  # one write, one retry; nothing after
+    coord.entry.async_start_reauth.assert_called()
+    assert staging.count == 2
+
+
+async def test_read_settings_waits_for_a_flush_in_progress():
+    import asyncio
+
+    from custom_components.hanchuess.staging import SettingsStagingBuffer
+
+    coord, client = _coordinator({"success": True}, [])
+    _fake_device(client)
+    gate = asyncio.Event()
+    inner = client.async_platform_iot_set
+
+    async def slow_set(sn, dev_type, value):
+        await gate.wait()
+        return await inner(sn, dev_type, value)
+
+    client.async_platform_iot_set = slow_set
+    refreshed = []
+
+    async def fake_refresh():
+        refreshed.append(True)
+        coord.last_update_success = True
+        coord.data = {"chgSocLmt": "97"}
+
+    coord.async_refresh = fake_refresh
+    staging = SettingsStagingBuffer()
+    staging.stage("chgSocLmt", 97)
+    flush = asyncio.ensure_future(coord.async_write_staged(staging))
+    await asyncio.sleep(0)
+    read = asyncio.ensure_future(coord.async_refresh_settings(staging))
+    await asyncio.sleep(0.01)
+    assert refreshed == []  # the read is held back while the flush is mid-write
+    gate.set()
+    assert await flush == {}
+    assert await read is True
+    assert refreshed == [True]
+
+
+async def test_read_settings_keeps_edits_for_keys_the_response_did_not_contain():
+    from custom_components.hanchuess.staging import SettingsStagingBuffer
+
+    coord, _ = _coordinator({"success": True}, [])
+
+    async def partial_refresh():
+        coord.last_update_success = True
+        coord.data = {"chgSocLmt": "98"}  # incomplete response
+
+    coord.async_refresh = partial_refresh
+    staging = SettingsStagingBuffer()
+    staging.stage("chgSocLmt", 90)
+    staging.stage("gridCharging", 1)
+    assert await coord.async_refresh_settings(staging) is True
+    assert staging.snapshot() == {"gridCharging": 1}
+
+
+async def test_failed_read_settings_keeps_every_edit():
+    from custom_components.hanchuess.staging import SettingsStagingBuffer
+
+    coord, _ = _coordinator({"success": True}, [])
+
+    async def failed_refresh():
+        coord.last_update_success = False
+
+    coord.async_refresh = failed_refresh
+    staging = SettingsStagingBuffer()
+    staging.stage("chgSocLmt", 90)
+    assert await coord.async_refresh_settings(staging) is False
+    assert staging.snapshot() == {"chgSocLmt": 90}
+
+
+async def test_clear_staged_waits_for_a_flush():
+    import asyncio
+
+    from custom_components.hanchuess.staging import SettingsStagingBuffer
+
+    coord, client = _coordinator({"success": True}, [])
+    _fake_device(client)
+    gate = asyncio.Event()
+    inner = client.async_platform_iot_set
+
+    async def slow_set(sn, dev_type, value):
+        await gate.wait()
+        return await inner(sn, dev_type, value)
+
+    client.async_platform_iot_set = slow_set
+    staging = SettingsStagingBuffer()
+    staging.stage("chgSocLmt", 97)
+    flush = asyncio.ensure_future(coord.async_write_staged(staging))
+    await asyncio.sleep(0)
+    clear = asyncio.ensure_future(coord.async_clear_staged(staging))
+    await asyncio.sleep(0.01)
+    assert not clear.done()
+    gate.set()
+    await flush
+    await clear
+    assert staging.count == 0
+
+
+def test_unknown_dev_model_uses_the_remembered_12k_identity():
+    from types import SimpleNamespace
+
+    from custom_components.hanchuess import _resolve_inverter_model
+
+    hass = MagicMock()
+    entry = SimpleNamespace(data={"dev_model": 29})
+    assert _resolve_inverter_model(hass, entry, None).code == 29
+    assert _resolve_inverter_model(hass, entry, "").code == 29
+    hass.config_entries.async_update_entry.assert_not_called()
+
+
+def test_identified_12k_is_remembered_and_other_models_are_not_persisted():
+    from types import SimpleNamespace
+
+    from custom_components.hanchuess import _resolve_inverter_model
+
+    hass = MagicMock()
+    entry = SimpleNamespace(data={"sn": "x"})
+    assert _resolve_inverter_model(hass, entry, "29").code == 29
+    hass.config_entries.async_update_entry.assert_called_once()
+    hass.config_entries.async_update_entry.reset_mock()
+    assert _resolve_inverter_model(hass, SimpleNamespace(data={}), "4").code == 4
+    hass.config_entries.async_update_entry.assert_not_called()
+    assert _resolve_inverter_model(hass, SimpleNamespace(data={}), None) is None

@@ -36,12 +36,18 @@ later versions are tracked here going forward.
   Load Power falls back to `loadPwr` when `loadEpsPwr` is absent.
   Hybrid grid mode (`workMode`) is writable for options 2 and 3 only; On Grid (1) is refused because it allows export.
 - HESS-HY-S-12K-S: settings reads and writes refresh the token once and retry on a
-  401 instead of failing the write; a second failure is reported as a normal write error.
+  401 instead of failing the write; a second failure stops the flush and starts
+  reauthentication.
 - HESS-HY-S-12K-S writes: the whole staged set is validated first and written in a safe
   order (schedule disables first, enables last and only if the schedule's parameters were
   confirmed); concurrent Write Settings calls are serialised; a value staged while an older
-  one is being written is kept; read-back confirmation is exact; Read Settings keeps pending
-  edits if the read fails; non-finite numbers are rejected cleanly.
+  one is being written is kept; read-back confirmation is exact; non-finite numbers are
+  rejected cleanly. Nothing is sent if any staged value is invalid. An enabled schedule is
+  disabled before its parameters change and re-enabled only once they all confirmed. Read
+  Settings, Write Settings and clearing the staged edits wait for each other; Read Settings
+  only drops edits for keys it actually re-read and keeps all edits if the read fails. The
+  grid-export option fails closed on any non-boolean value. A 12K-S that was identified once
+  stays identified if a later status response omits `devModel`.
 - Documentation: manual extraction (`docs/hess-hy-s-12k-s-manual.md`) and the
   model-29 write matrix (`docs/model29-write-plan.md`).
 
