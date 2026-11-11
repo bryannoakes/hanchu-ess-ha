@@ -30,8 +30,10 @@ The same HA-scoped token does work against the encrypted platform endpoint `POST
 | The generic Work Mode, number, time, Write Settings and Fast Charge/Discharge entities are not created | Their keys and semantics do not match this model; a write through them would be unverified. |
 | `hanchuess.device_control`, the websocket `iot_set` and `fast_charge`, and the fast-charge service are refused for a model-29 target | Defence in depth: hiding the entities is not enough while the services are still callable. The check uses the target entry's model, never the caller-supplied `dev_type`. |
 | The pending-settings counter sensor is not created | Nothing is staged in the read-only version. |
+| A 12K-S that was identified once is remembered in the config entry | The guards above depend on knowing the model. If a later status response omits `devModel`, the model would look unknown and the generic write paths would reopen, so this PR must not rely on a later one for that protection. |
+| No schedule poll for the Inverter Status sensor (added in 2.4.0) | That poll reads generic keys through `/app/ha/iotGet`, which does not answer for this model. The sensor still works from the realtime data (charging, discharging, idle); its fast/scheduled states need the generic schedule keys and are not available on model 29. |
 | A model-29 settings block appears in diagnostics | Support. It is passed through the existing redaction. |
-| API debug logging no longer prints response bodies | Platform responses can contain account or station data and users paste debug logs into issues. Only the status and the response code are logged. |
+| API debug logging no longer prints response bodies, and the "unexpected status" error no longer prints the payload (**applies to every model**, not only model 29) | Platform responses can contain account or station data and users paste debug logs into issues. Only the status and the response code are logged. |
 
 ## Settings read
 

@@ -23,7 +23,12 @@ later versions are tracked here going forward.
   differs materially from the generic HA settings API.
 - Generic settings and fast charge/discharge write controls are suppressed and
   server-side write paths are blocked for model 29.
-- API debug logging no longer prints response bodies (only the status and response code).
+- API debug logging no longer prints response bodies, and the "unexpected status" error no
+  longer prints the payload (all models; only the status and response code are logged).
+- HESS-HY-S-12K-S: a model identified once is remembered, so a status response without
+  `devModel` cannot make the inverter look unknown and reopen the generic write paths. The
+  Inverter Status sensor's schedule poll is not started for this model (the generic keys it
+  reads are not answered by it).
 
 ### Fixed
 - HESS-HY-S-12K-S read-only settings sensors use the diagnostic entity category

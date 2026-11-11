@@ -107,7 +107,7 @@ class HanchuessApiClient:
                             if result.get("code") == 401:
                                 return {"success": False, "code": 401}
                             return result
-                        _LOGGER.error("[HANCHUESS] unexpected status: %s %s", response.status, str(result)[:200])
+                        _LOGGER.error("[HANCHUESS] unexpected status: %s", response.status)
             except TimeoutError:
                 last_err = "timeout"
                 _LOGGER.warning("[HANCHUESS] Request timeout (attempt %s/%s): %s", attempt, retries, url)

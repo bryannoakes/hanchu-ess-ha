@@ -228,7 +228,7 @@ code `100` / data `900001`, while the same HA-scoped token succeeds against
 the encrypted `/platform/deviceNew/iotGet` endpoint.
 
 For model 29 the integration therefore reads the platform settings schema and
-exposes those values as **read-only configuration sensors**. The generic Work
+exposes those values as **read-only diagnostic sensors**. The generic Work
 Mode, number, time-slot, Write Settings, and Fast Charge/Discharge controls are
 not created for this model during validation. This is intentional: the 12K-S
 menu exposes separate Hybrid grid mode, Battery energy manage, PV energy manage,

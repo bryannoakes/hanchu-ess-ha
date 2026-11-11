@@ -12,7 +12,7 @@ from homeassistant.exceptions import ConfigEntryNotReady
 import homeassistant.helpers.device_registry as dr
 import homeassistant.helpers.config_validation as cv
 from .const import DOMAIN, PLATFORMS, BASE_URL
-from .settings_12k import MODEL_CODE as MODEL_12K_CODE
+from .settings_12k import MODEL_CODE as MODEL_12K_CODE, is_12k_s
 from .api import HanchuessApiClient
 from .battery import merge_battery_serials
 from .models import (
@@ -113,6 +113,28 @@ def _find_entry(hass: HomeAssistant, sn: str | None = None):
         if sn is None or entry.data.get("sn") == sn:
             return entry
     return None
+
+
+def _resolve_inverter_model(hass, entry, dev_model):
+    """Identify the model from the status ``devModel``.
+
+    A status response that omits ``devModel`` must not make a known
+    HESS-HY-S-12K-S look unrecognised (that would re-enable the generic write
+    paths), so a 12K-S identified earlier is remembered in the config entry
+    and used when the code is absent.
+    """
+    if dev_model in (None, ""):
+        dev_model = entry.data.get("dev_model")
+    model = lookup_inverter_model(dev_model)
+    if (
+        model is not None
+        and model.code == MODEL_12K_CODE
+        and entry.data.get("dev_model") != model.code
+    ):
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, "dev_model": model.code}
+        )
+    return model
 
 
 async def async_flush_staged(hass: HomeAssistant, entry) -> bool:
@@ -224,9 +246,7 @@ async def async_device_control_service(hass: HomeAssistant, call: ServiceCall) -
     # Blocked on the target's model alone: a caller-supplied dev_type must never
     # decide whether the generic /app/ha/iotSet path is reachable.
     if (
-        entry is not None
-        and entry.runtime_data.inverter_model is not None
-        and entry.runtime_data.inverter_model.code == MODEL_12K_CODE
+        entry is not None and is_12k_s(entry)
     ):
         message = (
             "Generic settings writes are disabled for HESS-HY-S-12K-S; "
@@ -395,9 +415,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
         entry = _find_entry(hass, inverter_serial_number)
         if (
-            entry is not None
-            and entry.runtime_data.inverter_model is not None
-            and entry.runtime_data.inverter_model.code == MODEL_12K_CODE
+            entry is not None and is_12k_s(entry)
         ):
             _LOGGER.error(
                 "[HANCHUESS] fast_charge blocked for HESS-HY-S-12K-S during read-only validation"
@@ -474,9 +492,7 @@ async def ws_iot_get(hass, connection, msg):
         return
     entry = _find_entry(hass, inverter_serial_number)
     if (
-        entry is not None
-        and entry.runtime_data.inverter_model is not None
-        and entry.runtime_data.inverter_model.code == MODEL_12K_CODE
+        entry is not None and is_12k_s(entry)
     ):
         result = await coordinator.client.async_platform_iot_get(
             inverter_serial_number, dev_type, keys
@@ -527,9 +543,7 @@ async def ws_iot_set(hass, connection, msg):
         return
     entry = _find_entry(hass, inverter_serial_number)
     if (
-        entry is not None
-        and entry.runtime_data.inverter_model is not None
-        and entry.runtime_data.inverter_model.code == MODEL_12K_CODE
+        entry is not None and is_12k_s(entry)
     ):
         connection.send_error(
             msg["id"],
@@ -577,9 +591,7 @@ async def ws_fast_charge(hass, connection, msg):
         return
     entry = _find_entry(hass, inverter_serial_number)
     if (
-        entry is not None
-        and entry.runtime_data.inverter_model is not None
-        and entry.runtime_data.inverter_model.code == MODEL_12K_CODE
+        entry is not None and is_12k_s(entry)
     ):
         connection.send_error(
             msg["id"],
@@ -738,7 +750,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: HanchuessConfigEntry) ->
     # 3 kW to 10 kW alike), so where the model table knows the battery
     # maximum it overrides the menu. Unknown codes keep the menu values.
     dev_model = (coordinator.data or {}).get("devModel")
-    inverter_model = lookup_inverter_model(dev_model)
+    inverter_model = _resolve_inverter_model(hass, entry, dev_model)
     if inverter_model is None:
         _LOGGER.info(
             "[HANCHUESS] Inverter model not recognised (devModel=%r); "
@@ -815,11 +827,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: HanchuessConfigEntry) ->
 
     # Seed the schedule cache from the startup read so the status sensor is
     # right immediately and the first extra iotGet waits a full interval.
-    schedule_coordinator = HanchuessScheduleCoordinator(hass, entry, client)
-    if startup_values:
-        schedule_coordinator.seed(startup_values)
-    else:
-        await schedule_coordinator.async_refresh()
+    # Model 29 has no generic schedule keys: /app/ha/iotGet does not answer for it,
+    # so there is nothing to poll (the status sensor then uses the realtime data only).
+    schedule_coordinator = None
+    if settings_coordinator is None:
+        schedule_coordinator = HanchuessScheduleCoordinator(hass, entry, client)
+        if startup_values:
+            schedule_coordinator.seed(startup_values)
+        else:
+            await schedule_coordinator.async_refresh()
 
     entry.runtime_data = HanchuessData(
         realtime=coordinator,

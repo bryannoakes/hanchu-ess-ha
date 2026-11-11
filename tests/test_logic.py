@@ -839,3 +839,30 @@ def test_read_only_setting_sensor_category_is_valid_for_sensors():
     from custom_components.hanchuess.sensor import HanchuessReadOnlySettingSensor
 
     assert HanchuessReadOnlySettingSensor._attr_entity_category is not EntityCategory.CONFIG
+
+
+def test_unknown_dev_model_uses_the_remembered_12k_identity():
+    from types import SimpleNamespace
+
+    from custom_components.hanchuess import _resolve_inverter_model
+
+    hass = MagicMock()
+    entry = SimpleNamespace(data={"dev_model": 29})
+    assert _resolve_inverter_model(hass, entry, None).code == 29
+    assert _resolve_inverter_model(hass, entry, "").code == 29
+    hass.config_entries.async_update_entry.assert_not_called()
+
+
+def test_identified_12k_is_remembered_and_other_models_are_not_persisted():
+    from types import SimpleNamespace
+
+    from custom_components.hanchuess import _resolve_inverter_model
+
+    hass = MagicMock()
+    entry = SimpleNamespace(data={"sn": "x"})
+    assert _resolve_inverter_model(hass, entry, "29").code == 29
+    hass.config_entries.async_update_entry.assert_called_once()
+    hass.config_entries.async_update_entry.reset_mock()
+    assert _resolve_inverter_model(hass, SimpleNamespace(data={}), "4").code == 4
+    hass.config_entries.async_update_entry.assert_not_called()
+    assert _resolve_inverter_model(hass, SimpleNamespace(data={}), None) is None
