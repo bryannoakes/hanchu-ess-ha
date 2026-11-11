@@ -773,3 +773,24 @@ def test_pending_sensor_resets_to_zero_after_clear():
 def test_pending_sensor_unique_id():
     sensor, _ = _make_pending_sensor("MYSERIAL")
     assert sensor.unique_id == "MYSERIAL_pending_settings_changes"
+
+
+def test_load_power_fallback_value_is_numeric_when_the_field_is_a_string():
+    coordinator = MagicMock()
+    coordinator.data = {"loadPwr": "450"}
+    s = HanchueSensor(coordinator, _FakeEntry(), "load_power", SENSORS["load_power"])
+    assert s.native_value == 450.0
+
+
+def test_load_power_zero_rule_returns_numeric_for_a_string_legacy_value():
+    coordinator = MagicMock()
+    coordinator.data = {"loadPwr": "450", "loadEpsPwr": 0.0, "loadEpsPwrUnit": "kW"}
+    s = HanchueSensor(coordinator, _FakeEntry(), "load_power", SENSORS["load_power"])
+    assert s.native_value == 450.0
+
+
+def test_load_power_non_numeric_fallback_is_none():
+    coordinator = MagicMock()
+    coordinator.data = {"loadPwr": "n/a"}
+    s = HanchueSensor(coordinator, _FakeEntry(), "load_power", SENSORS["load_power"])
+    assert s.native_value is None
