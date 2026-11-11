@@ -589,7 +589,6 @@ class HanchuessSettingsLastRefreshSensor(CoordinatorEntity, SensorEntity):
                 if self.coordinator.last_exception is not None
                 else None
             ),
-            "raw_settings": dict(data),
         }
 
 

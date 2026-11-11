@@ -288,11 +288,9 @@ class HanchuessApiClient:
         if result and result.get("success"):
             return result.get("data", {})
         _LOGGER.warning(
-            "[HANCHUESS] platform iotGet failed for %s: code=%s msg=%s data=%s",
-            sn,
+            "[HANCHUESS] platform iotGet failed: code=%s msg=%s",
             result.get("code") if result else None,
             result.get("msg") if result else None,
-            result.get("data") if result else None,
         )
         return {}
 

@@ -23,6 +23,7 @@ later versions are tracked here going forward.
   differs materially from the generic HA settings API.
 - Generic settings and fast charge/discharge write controls are suppressed and
   server-side write paths are blocked for model 29.
+- API debug logging no longer prints response bodies (only the status and response code).
 
 ### Fixed
 - HESS-HY-S-12K-S read-only settings sensors use the diagnostic entity category
@@ -42,6 +43,8 @@ later versions are tracked here going forward.
   sensor stops the extra poll. Based on @lancedfr's recipe (#33).
 
 ### Documentation
+- HESS-HY-S-12K-S (model 29): what is different for this model, why, and what was
+  verified (`docs/hess-hy-s-12k-s.md`).
 - Inverter status recipe: added a variant for systems controlled by
   Predbat's built-in Hanchu ESS integration, which uses `predbat.status` for
   the Scheduled Charge / Scheduled Discharge statuses, because Predbat's slot

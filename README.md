@@ -233,7 +233,8 @@ Mode, number, time-slot, Write Settings, and Fast Charge/Discharge controls are
 not created for this model during validation. This is intentional: the 12K-S
 menu exposes separate Hybrid grid mode, Battery energy manage, PV energy manage,
 timed charge/discharge enables, and per-period limits whose semantics do not map
-safely to the generic writable controls.
+safely to the generic writable controls. Only this model was tested; see
+[docs/hess-hy-s-12k-s.md](docs/hess-hy-s-12k-s.md) for the reasons and the details.
 
 ### First-time setup
 

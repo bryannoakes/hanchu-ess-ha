@@ -179,11 +179,7 @@ class HanchuessSettingsCoordinator(TimestampDataUpdateCoordinator):
         )
         if not data:
             raise UpdateFailed("Failed to get model-29 settings")
-        _LOGGER.info(
-            "[HANCHUESS] Model-29 settings refresh returned %d keys: %s",
-            len(data),
-            data,
-        )
+        _LOGGER.debug("[HANCHUESS] Model-29 settings refresh returned %d keys", len(data))
         return data
 
 
