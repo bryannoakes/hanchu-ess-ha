@@ -28,9 +28,9 @@ Source of truth: `WRITABLE_SETTINGS` in `settings_12k.py` (ranges and options co
 | `timedChargeEnable`, `timedDischargeEnable` | 0/1 | yes | |
 | `generatorStartChg` | 0/1 | yes | |
 | `generatorMaxChgC` | number 0-60 | yes | |
-| `batDischgManagement` | 0, 1, 2 | 2<->1 only; 0 not tested | 3 (grid sell) is never offered or written |
-| `pvChargingPriority` | 0, 1 | 0<->1 | 2 (first to grid) is never offered or written |
-| `workMode` | 2, 3 | 3->2->3 | 1 (On Grid) is never offered or written |
+| `batDischgManagement` | 0, 1, 2 | 2<->1 only; 0 not tested | 3 (grid sell) needs the export option |
+| `pvChargingPriority` | 0, 1 | 0<->1 | 2 (first to grid) needs the export option |
+| `workMode` | 2, 3 | 3->2->3 | 1 (On Grid) needs the export option |
 | charge/discharge slot 1-3 start/end | `"HHMM"` string | all 12 | slot 1 via HA, slots 2-3 via the API |
 | `timePeriodN` stop SOC | int 0-100 | all 6 | |
 | `timePeriodN` stop voltage | number 40-59.5 | all 6 | |
@@ -58,39 +58,27 @@ Slot 2/3 entities are disabled by default in the entity registry. Every live tes
    error without a second refresh (reads raise the usual auth failure; writes stop the flush and start reauthentication).
 5. Read Settings waits for any flush, re-reads, and on success discards only the staged edits whose key was actually
    returned (and not changed meanwhile). A failed or partial read keeps the rest.
-6. Grid-export option values are refused (see below).
+6. The export gate fails closed: only the literal boolean `True` opens it.
 7. A 12K-S identified once is remembered (`dev_model` in the config entry), so a status response that omits `devModel`
    cannot make it look like an unknown model and re-open the generic write paths.
 
-## Write guarantees and partial failures
+## Grid export is an opt-in
 
-Before sending any settings, the integration validates the entire staged snapshot. If validation fails, no writes are
-sent. Once writing begins, settings are written individually and each is confirmed through a fresh read. **This is not
-an atomic transaction**: some settings can succeed before a later one fails, and the failed ones stay staged.
+`GRID_EXPORT_REFUSED` values (`workMode` 1, `batDischgManagement` 3, `pvChargingPriority` 2) are export-capable. They
+are refused by `validate_setting_write` and hidden from the selects unless the model-29 option `allow_grid_export` is on
+(options flow, default off; anything but the literal boolean `True` counts as off). The gate is in the validator, not
+only the UI. With the option on, those choices appear labelled "(grid export)". Changing the option reloads the
+integration (the options flow reloads the entry), which rebuilds the selects.
 
-Schedule parameters are updated only after an enabled schedule has been disabled and the disable confirmed. Re-enabling
-is deferred until every dependent parameter is confirmed. If a parameter fails, the schedule stays disabled and the
-unresolved edits (and the re-enable) stay pending.
+### Safety boundary
 
-Immediately before each key is sent, the integration checks that the key is still staged with the snapshot value. If
-the user changed or discarded it while earlier keys were being written, the old value is not sent, the key is reported
-as "changed while writing", and anything that depends on it (a schedule's enable) is withheld. The newer edit stays
-staged for the next Write Settings.
+This option only governs which settings this integration is allowed to write. It does not configure the inverter's
+grid-export limit, does not prevent export through other controls (the app, the inverter display, an installer
+setting), and does not guarantee compliance with local grid requirements. Turning it off later does not undo a value
+that was already written; it only stops this integration from offering or writing export-capable values.
 
-## Uncertain outcomes
-
-A write can be queued by the cloud while the answer is lost (for example a timeout). The integration therefore never
-assumes a timed-out `iotSet` was rejected and never re-sends it automatically: the client makes a single attempt, and an
-unanswered write is read back like any other. If the device shows the new value the write is confirmed; if not, the key
-is reported with "the outcome is unknown, check the value before writing again" and stays staged. A write that is still
-being applied by the device after the read-back window can land later; pressing Write Settings again re-sends the same
-value, which is harmless unless the staged value was changed in between, so check the current value first.
-
-## Grid export is never written
-
-`GRID_EXPORT_REFUSED` values (`workMode` 1, `batDischgManagement` 3, `pvChargingPriority` 2) let the inverter feed the
-grid. Export is restricted or illegal in some regions and none of these was ever sent to hardware, so they are not
-offered by the selects and `validate_setting_write` refuses them (the check is in the validator, not only the UI).
+No export-capable value has been written to hardware by the author. This path is covered by unit tests only and needs
+validation on an installation where export is permitted and the inverter's own export protection is configured.
 
 ## Not covered
 

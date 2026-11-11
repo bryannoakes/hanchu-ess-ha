@@ -46,7 +46,11 @@
           "statistics_interval": "Statistics poll interval (seconds)",
           "battery_interval": "Battery poll interval (seconds)",
           "fast_charge_duration": "Fast charge/discharge duration (minutes)",
-          "schedule_interval": "Inverter status schedule poll interval (seconds)"
+          "schedule_interval": "Inverter status schedule poll interval (seconds)",
+          "allow_grid_export": "Allow grid export settings (HESS-HY-S-12K-S only)"
+        },
+        "data_description": {
+          "allow_grid_export": "Off by default. When on, the Battery to grid sell, First to grid and On Grid options become selectable. Only enable this if grid export is permitted by your network operator and local regulations."
         }
       }
     }

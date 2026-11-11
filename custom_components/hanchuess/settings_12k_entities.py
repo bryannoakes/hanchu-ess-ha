@@ -18,7 +18,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .models import inverter_model_name
-from .settings_12k import WRITABLE_SETTINGS, allowed_options
+from .settings_12k import WRITABLE_SETTINGS, GRID_EXPORT_REFUSED, allowed_options
 
 
 class _Base(CoordinatorEntity):
@@ -75,7 +75,9 @@ class _Base(CoordinatorEntity):
         from .settings_12k import SettingWriteError, validate_setting_write
 
         try:
-            number = validate_setting_write(self._key, value)
+            number = validate_setting_write(
+                self._key, value, allow_export=self.coordinator.allow_grid_export
+            )
         except SettingWriteError as err:
             raise HomeAssistantError(str(err)) from err
         staging = self._entry.runtime_data.staging
@@ -124,7 +126,12 @@ class SettingSwitch(_Base, SwitchEntity):
 class SettingSelect(_Base, SelectEntity):
     def __init__(self, entry, coordinator, key):
         super().__init__(entry, coordinator, key)
-        self._by_label = {n: v for v, n in allowed_options(key).items()}
+        # Export-capable options are only offered when the user opted in.
+        refused = GRID_EXPORT_REFUSED.get(key, set())
+        self._by_label = {
+            (f"{n} (grid export)" if v in refused else n): v
+            for v, n in allowed_options(key, coordinator.allow_grid_export).items()
+        }
         self._attr_options = list(self._by_label)
 
     @property

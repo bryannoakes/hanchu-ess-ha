@@ -6,7 +6,7 @@ HA menu and were validated against /gateway/platform/deviceNew/iotGet.
 
 Only the keys in ``WRITABLE_SETTINGS`` can be written, and every value goes
 through ``validate_setting_write`` first.  Options that would allow grid export
-are never offered or written (see ``GRID_EXPORT_REFUSED``).
+are refused unless the user opted in (see ``GRID_EXPORT_REFUSED``).
 """
 from __future__ import annotations
 
@@ -189,9 +189,9 @@ def decode_setting_value(key: str, raw, dynamic_options: dict | None = None):
 #   (integer times are rejected by the device).
 # ---------------------------------------------------------------------------
 GRID_EXPORT_REFUSED: dict[str, set[int]] = {
-    # Option values that let the inverter feed the grid. Export is restricted or
-    # illegal in some regions and none of these was ever tested on hardware, so
-    # they are never offered or written.
+    # Export-capable option values. Refused unless the user explicitly enables
+    # "Allow grid export settings" (default off). Export is restricted or illegal
+    # in some regions and none of these was tested on hardware.
     "workMode": {1},               # On Grid (allows export)
     "batDischgManagement": {3},    # Battery to grid sell
     "pvChargingPriority": {2},     # First to grid
@@ -245,9 +245,13 @@ for _slot in (1, 2, 3):
     }
 
 
-def allowed_options(key: str) -> dict[int, str]:
-    """Selectable options for an enum key (grid-export options are left out)."""
-    refused = GRID_EXPORT_REFUSED.get(key, set())
+def allowed_options(key: str, allow_export: bool = False) -> dict[int, str]:
+    """Selectable options for an enum key.
+
+    Options that allow grid export are only included when the user has opted in
+    (config-entry option ``allow_grid_export``, default off).
+    """
+    refused = set() if allow_export is True else GRID_EXPORT_REFUSED.get(key, set())
     return {v: n for v, n in ENUM_OPTIONS.get(key, {}).items() if v not in refused}
 
 
@@ -267,10 +271,10 @@ def _to_number(key: str, value) -> float:
     return number
 
 
-def validate_setting_write(key: str, value):
+def validate_setting_write(key: str, value, allow_export: bool = False):
     """Return the value to send (int, float or "HHMM" str), or raise SettingWriteError.
 
-    Grid-export option values are always refused.
+    Grid-export option values are refused unless ``allow_export`` is True.
     """
     spec = WRITABLE_SETTINGS.get(key)
     if spec is None:
@@ -298,10 +302,10 @@ def validate_setting_write(key: str, value):
             raise SettingWriteError(f"{key}: must be 0 or 1")
         return number
     if kind == "enum":
-        if number in GRID_EXPORT_REFUSED.get(key, set()):
+        if allow_export is not True and number in GRID_EXPORT_REFUSED.get(key, set()):
             raise SettingWriteError(
-                f"{key}={number} is refused: it allows grid export, which this integration "
-                "does not write"
+                f"{key}={number} is refused: it allows grid export, which is disabled "
+                "(enable \"Allow grid export settings\" in the integration options)"
             )
         if number not in ENUM_OPTIONS.get(key, {}):
             raise SettingWriteError(f"{key}: {number} is not a valid option")

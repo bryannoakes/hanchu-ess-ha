@@ -14,6 +14,7 @@ from .const import (
     CONF_STATISTICS_INTERVAL,
     CONF_BATTERY_INTERVAL,
     CONF_FAST_CHARGE_DURATION,
+    CONF_ALLOW_GRID_EXPORT,
     DEFAULT_REALTIME_INTERVAL,
     DEFAULT_STATISTICS_INTERVAL,
     DEFAULT_BATTERY_INTERVAL,
@@ -303,4 +304,12 @@ def _options_schema(options, model_29: bool) -> vol.Schema:
                 default=options.get(CONF_SCHEDULE_INTERVAL, DEFAULT_SCHEDULE_INTERVAL),
             )
         ] = vol.All(vol.Coerce(int), vol.Range(min=MIN_SCHEDULE_INTERVAL, max=3600))
+    else:
+        # Model 29 only: opt in to option values that allow grid export.
+        fields[
+            vol.Required(
+                CONF_ALLOW_GRID_EXPORT,
+                default=options.get(CONF_ALLOW_GRID_EXPORT, False),
+            )
+        ] = bool
     return vol.Schema(fields)

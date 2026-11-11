@@ -271,6 +271,7 @@ def test_entities_built_from_allow_list_and_select_hides_export():
     entry = MagicMock()
     entry.data = {"sn": "SN1"}
     coord = MagicMock()
+    coord.allow_grid_export = False
     ents = build_entities(entry, coord, ("int", "float", "bool", "enum", "hhmm"))
     assert {e._key for e in ents} == set(WRITABLE_SETTINGS)
     assert len({e.unique_id for e in ents}) == len(ents)
@@ -302,19 +303,48 @@ def test_work_mode_refuses_on_grid_and_unknown(value):
         validate_setting_write("workMode", value)
 
 
-# --- Grid export values are never writable ---------------------------------
+# --- Opt-in grid export (default off, user-configurable) --------------------
 
 @pytest.mark.parametrize("key,value", [("workMode", 1), ("batDischgManagement", 3), ("pvChargingPriority", 2)])
-def test_export_values_are_always_refused(key, value):
-    with pytest.raises(SettingWriteError, match="grid export"):
+def test_export_values_allowed_only_when_opted_in(key, value):
+    with pytest.raises(SettingWriteError, match="Allow grid export"):
         validate_setting_write(key, value)
+    assert validate_setting_write(key, value, allow_export=True) == value
 
 
-async def test_coordinator_refuses_export_values_without_sending():
+def test_allowed_options_include_export_only_when_opted_in():
+    from custom_components.hanchuess.settings_12k import allowed_options
+    assert 1 in allowed_options("workMode", True) and 1 not in allowed_options("workMode")
+    assert 3 in allowed_options("batDischgManagement", True)
+    assert 2 in allowed_options("pvChargingPriority", True)
+
+
+def test_opt_in_does_not_widen_other_validation():
+    with pytest.raises(SettingWriteError):
+        validate_setting_write("workMode", 4, allow_export=True)
+    with pytest.raises(SettingWriteError):
+        validate_setting_write("enPower", 1, allow_export=True)
+
+
+def test_select_offers_labelled_export_options_when_opted_in():
+    from custom_components.hanchuess.settings_12k_entities import build_entities
+    entry = MagicMock(); entry.data = {"sn": "SN1"}
+    coord = MagicMock(); coord.allow_grid_export = True
+    sel = {e._key: e for e in build_entities(entry, coord, ("enum",))}
+    assert "Battery to grid sell (grid export)" in sel["batDischgManagement"].options
+    assert "On Grid (grid export)" in sel["workMode"].options
+    coord.data = {"workMode": "1"}
+    assert sel["workMode"].current_option == "On Grid (grid export)"
+
+
+async def test_coordinator_uses_entry_option_for_export_gate():
     coord, client = _coordinator({"success": True}, [{"workMode": "1"}])
-    with pytest.raises(HomeAssistantError, match="grid export"):
+    coord.entry.options = {}
+    with pytest.raises(HomeAssistantError, match="Allow grid export"):
         await coord.async_write_setting("workMode", 1, delay=0)
     client.async_platform_iot_set.assert_not_awaited()
+    coord.entry.options = {"allow_grid_export": True}
+    assert await coord.async_write_setting("workMode", 1, delay=0) == 1
 
 
 # --- Staged writes (uniform with the generic staging layer) ------------------
@@ -328,6 +358,7 @@ def _staged_entity(key, current):
     entry.data = {"sn": "SN1"}
     entry.runtime_data = SimpleNamespace(staging=SettingsStagingBuffer())
     coord = MagicMock()
+    coord.allow_grid_export = False
     coord.data = {key: current}
     ent = next(e for e in build_entities(entry, coord, ("int", "float", "bool", "enum", "hhmm")) if e._key == key)
     ent.async_write_ha_state = MagicMock()
@@ -357,9 +388,9 @@ async def test_entity_rejects_invalid_value_at_stage_time():
     assert staging.snapshot() == {}
 
 
-async def test_entity_refuses_export_value_at_stage_time():
+async def test_entity_refuses_export_value_at_stage_time_by_default():
     ent, staging, _ = _staged_entity("batDischgManagement", "2")
-    with pytest.raises(HomeAssistantError, match="grid export"):
+    with pytest.raises(HomeAssistantError, match="Allow grid export"):
         await ent._write(3)
     assert staging.snapshot() == {}
 
@@ -575,6 +606,28 @@ async def test_second_401_on_read_back_is_an_auth_error_not_a_readback_failure()
 
 
 # --- Round 2 review regressions -------------------------------------------
+
+
+@pytest.mark.parametrize("option", ["false", "true", "yes", 1, 0, None, [], "1"])
+def test_export_gate_fails_closed_for_non_boolean_options(option):
+    coord, _ = _coordinator({"success": True}, [])
+    coord.entry.options = {"allow_grid_export": option}
+    assert coord.allow_grid_export is False
+
+
+def test_export_gate_opens_only_for_literal_true():
+    coord, _ = _coordinator({"success": True}, [])
+    coord.entry.options = {"allow_grid_export": True}
+    assert coord.allow_grid_export is True
+
+
+@pytest.mark.parametrize("flag", ["false", "true", 1, "yes", None])
+def test_validator_and_options_fail_closed_on_non_boolean_flag(flag):
+    from custom_components.hanchuess.settings_12k import allowed_options
+
+    with pytest.raises(SettingWriteError):
+        validate_setting_write("workMode", 1, allow_export=flag)
+    assert 1 not in allowed_options("workMode", flag)
 
 
 async def test_flush_disables_an_enabled_schedule_before_changing_its_parameters():

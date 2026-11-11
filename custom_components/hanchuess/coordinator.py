@@ -258,6 +258,11 @@ class HanchuessSettingsCoordinator(TimestampDataUpdateCoordinator):
             start(getattr(self, "hass", None))
 
     @property
+    def allow_grid_export(self) -> bool:
+        """True only when the user opted in to export-capable options."""
+        return self.entry.options.get("allow_grid_export", False) is True
+
+    @property
     def _write_lock(self) -> asyncio.Lock:
         lock = getattr(self, "_write_lock_obj", None)
         if lock is None:
@@ -299,7 +304,7 @@ class HanchuessSettingsCoordinator(TimestampDataUpdateCoordinator):
             errors: dict[str, str] = {}
             for key, value in snapshot.items():
                 try:
-                    validate_setting_write(key, value)
+                    validate_setting_write(key, value, allow_export=self.allow_grid_export)
                 except SettingWriteError as err:
                     errors[key] = str(err)
             if errors:
@@ -420,7 +425,9 @@ class HanchuessSettingsCoordinator(TimestampDataUpdateCoordinator):
         from .settings_12k import SettingWriteError, validate_setting_write
 
         try:
-            number = validate_setting_write(key, value)
+            number = validate_setting_write(
+                key, value, allow_export=self.allow_grid_export
+            )
         except SettingWriteError as err:
             raise HomeAssistantError(str(err)) from err
         sn = self.entry.data["sn"]

@@ -243,8 +243,11 @@ then written one key at a time through the encrypted `iotSet` endpoint, each
 **confirmed by reading the value back**; keys that fail stay staged and a
 notification lists them.
 
-Grid export is never offered: "Battery to grid sell", "First to grid" and Hybrid
-grid mode "On Grid" are not selectable and are refused if requested.
+Grid export is **off by default**: "Battery to grid sell", "First to grid" and
+Hybrid grid mode "On Grid" are not offered and are refused if requested. They
+can be made selectable (labelled "(grid export)") with the integration option
+**Allow grid export settings**, which only appears for this model. Enable it
+only if your network operator and local regulations permit export.
 
 Power on/off, restart, password, date/time and the other advanced settings are
 not writable. The generic Work Mode, number, time-slot and Fast

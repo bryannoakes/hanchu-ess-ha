@@ -877,8 +877,15 @@ def test_options_schema_omits_the_schedule_interval_for_model_29_only():
 
     generic = {str(k) for k in _options_schema({}, False).schema}
     model_29 = {str(k) for k in _options_schema({}, True).schema}
-    assert "schedule_interval" in generic
-    assert model_29 == generic - {"schedule_interval"}
+    assert "schedule_interval" in generic and "allow_grid_export" not in generic
+    # model 29: no schedule poll option, but the grid-export opt-in
+    assert model_29 == (generic - {"schedule_interval"}) | {"allow_grid_export"}
+
+
+def test_options_flow_reloads_the_entry_so_new_export_choices_appear():
+    from custom_components.hanchuess.config_flow import HanchuessOptionsFlow
+
+    assert HanchuessOptionsFlow.automatic_reload is True
 
 
 async def test_12k_read_settings_failure_keeps_pending_edits():

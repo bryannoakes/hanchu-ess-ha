@@ -579,3 +579,32 @@ async def test_setup_entry_passes_stored_credentials_to_client(hass: HomeAssista
         assert await hanchuess.async_setup_entry(hass, entry) is True
 
     client.set_credentials.assert_called_once_with("a", "p")
+
+
+async def test_options_flow_offers_grid_export_only_for_model_29(hass: HomeAssistant):
+    from types import SimpleNamespace
+
+    entry = MockConfigEntry(
+        domain=DOMAIN, data={"sn": "SN1", "token": "tok"}, unique_id="SN1"
+    )
+    entry.add_to_hass(hass)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert "allow_grid_export" not in result["data_schema"].schema.keys().__str__()
+    hass.config_entries.options.async_abort(result["flow_id"])
+
+    entry.runtime_data = SimpleNamespace(inverter_model=SimpleNamespace(code=29))
+    with patch.object(hass.config_entries, "async_schedule_reload", MagicMock()):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        assert "allow_grid_export" in str(list(result["data_schema"].schema))
+        result2 = await hass.config_entries.options.async_configure(
+            result["flow_id"],
+            {
+                "realtime_interval": 60,
+                "statistics_interval": 600,
+                "battery_interval": 600,
+                "fast_charge_duration": 30,
+                "allow_grid_export": True,
+            },
+        )
+    assert result2["type"] == FlowResultType.CREATE_ENTRY
+    assert entry.options["allow_grid_export"] is True

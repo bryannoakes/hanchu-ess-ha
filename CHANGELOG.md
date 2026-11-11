@@ -38,8 +38,9 @@ later versions are tracked here going forward.
 - HESS-HY-S-12K-S: a 401 from the settings endpoints refreshes the token once and retries; a
   second failure stops the flush and starts reauthentication. A 12K-S that was identified once
   stays identified if a later status response omits `devModel`.
-- HESS-HY-S-12K-S: grid-export option values (Battery to grid sell, First to grid, On Grid)
-  are never offered or written.
+- HESS-HY-S-12K-S: grid-export options (Battery to grid sell, First to grid, On Grid) are
+  refused and hidden unless the model-29 option "Allow grid export settings" is enabled
+  (default off; any non-boolean value counts as off).
 - Documentation: what is different for model 29 and why (`docs/hess-hy-s-12k-s.md`) and its
   write protocol (`docs/hess-hy-s-12k-s-writes.md`).
 - HESS-HY-S-12K-S: the Inverter Status sensor's schedule poll is not started for this model

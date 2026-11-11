@@ -36,7 +36,7 @@ The same HA-scoped token does work against the encrypted platform endpoints
 | No schedule poll for the Inverter Status sensor (added in 2.4.0) | That poll reads generic keys through `/app/ha/iotGet`, which does not answer for this model. The sensor still works from the realtime data (charging, discharging, idle); its fast/scheduled states need the generic schedule keys and are not available on model 29. The "schedule poll interval" option is not shown for this model. |
 | Staged changes use the same staging buffer and Write Settings button as the other models, but are written one key at a time, each confirmed by reading it back | The cloud answers a write with "task queued" and the device applies it a few seconds later; a batch can partially succeed. Only a read-back shows what the device holds. |
 | A schedule that is enabled is disabled before its times or limits change and re-enabled last, only if everything confirmed | The inverter must never run a half-edited schedule (for example a new start time with the old end time). |
-| Grid-export option values (Battery to grid sell, First to grid, On Grid) are never offered or written | Export is illegal or restricted in some regions and none of these was tested on hardware. The check is in the validator, not only in the UI. |
+| Grid-export option values are refused unless an options-flow switch is turned on (default off) | Export is illegal or restricted in some regions. The gate is in the validator, not only in the UI, and it fails closed. |
 | The failure notification uses `persistent_notification.async_create(hass, ...)` | `hass.components` no longer exists in current Home Assistant. |
 | API debug logging no longer prints response bodies, and the "unexpected status" error no longer prints the payload (**applies to every model**, not only model 29) | Platform responses can contain account or station data and users paste debug logs into issues. Only the status and the response code are logged. |
 | `wkLink` is redacted from diagnostics | The status response carries a link containing the serial number. |
@@ -61,7 +61,7 @@ checked against live responses. Values without an established meaning are shown 
 ## Not covered
 
 - Any other model.
-- `batDischgManagement` 0 (Standby), charge energy source 2 and 3 (generator): no hardware test.
+- Grid-export option values, `batDischgManagement` 0 (Standby), charge energy source 2 and 3 (generator): no hardware test.
 - The bundled Lovelace settings card: it speaks the generic keys and does not work on model 29.
 - Staged edits are not kept across a Home Assistant restart (same as the other models).
 - The vendor manual is the authority on inverter behaviour:
