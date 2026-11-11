@@ -46,7 +46,8 @@ published by Hanchu (Guoxia Technology, the manufacturer) which has had few upda
 Changes to all control entities above are **staged locally** and only sent to the
 device when you press **Write Settings** (or call the `hanchuess.write_settings`
 service). This batches all pending changes into a single `iotSet` API call,
-avoiding Hanchu's rate limiter.
+avoiding Hanchu's rate limiter. (The HESS-HY-S-12K-S is the exception: it writes
+one key at a time and confirms each by reading it back; see its section below.)
 
 - **Read Settings** button — calls `iotGet` for all control keys and refreshes
   every control entity's state from the device. Also runs automatically at startup.
@@ -92,7 +93,8 @@ In addition to the automatable entities above, this integration exposes two HA s
 
 ### `hanchuess.write_settings`
 
-Flush all staged control-entity changes to the device in a single `iotSet` call.
+Flush all staged control-entity changes to the device in a single `iotSet` call
+(one confirmed write per key on the HESS-HY-S-12K-S).
 Useful in automations that set time slots or other controls and need to ensure the
 device receives the update without the user pressing the Write Settings button.
 
@@ -227,14 +229,29 @@ the generic Hanchu HA control API. On this model, `/app/ha/iotGet` can return
 code `100` / data `900001`, while the same HA-scoped token succeeds against
 the encrypted `/platform/deviceNew/iotGet` endpoint.
 
-For model 29 the integration therefore reads the platform settings schema and
-exposes those values as **read-only diagnostic sensors**. The generic Work
-Mode, number, time-slot, Write Settings, and Fast Charge/Discharge controls are
-not created for this model during validation. This is intentional: the 12K-S
-menu exposes separate Hybrid grid mode, Battery energy manage, PV energy manage,
-timed charge/discharge enables, and per-period limits whose semantics do not map
-safely to the generic writable controls. Only this model was tested; see
-[docs/hess-hy-s-12k-s.md](docs/hess-hy-s-12k-s.md) for the reasons and the details.
+For model 29 the integration therefore uses the platform settings schema. All
+values are exposed as diagnostic sensors, and a strict allow-list of settings is
+writable through dedicated entities (switch / select / number / time): grid,
+timed charge/discharge and generator enables, Battery and PV energy manage,
+Hybrid grid mode, and the three charge and discharge periods (start/end times,
+stop SOC, stop voltage, max power, charge energy source).
+
+Like the generic controls, changes are **staged**: the entities show the pending
+value and nothing is sent until you press **Write Settings** (or call the
+`hanchuess.write_settings` service). Staged values are validated when entered,
+then written one key at a time through the encrypted `iotSet` endpoint, each
+**confirmed by reading the value back**; keys that fail stay staged and a
+notification lists them.
+
+Grid export is never offered: "Battery to grid sell", "First to grid" and Hybrid
+grid mode "On Grid" are not selectable and are refused if requested.
+
+Power on/off, restart, password, date/time and the other advanced settings are
+not writable. The generic Work Mode, number, time-slot and Fast
+Charge/Discharge controls are not created for this model. Charge/discharge
+periods 2 and 3 are disabled by default in the entity registry. See
+[docs/hess-hy-s-12k-s-writes.md](docs/hess-hy-s-12k-s-writes.md) for the full matrix and
+[docs/hess-hy-s-12k-s.md](docs/hess-hy-s-12k-s.md) for the reasons. Only this model was tested.
 
 ### First-time setup
 

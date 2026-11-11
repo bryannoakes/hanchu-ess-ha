@@ -1,13 +1,17 @@
-"""Read-only HESS-HY-S-12K-S platform settings schema.
+"""HESS-HY-S-12K-S (model 29) platform settings schema and write allow-list.
 
 The 48 V 12K-S exposes a different settings model from the generic HA iotGet
 schema used by older Hanchu inverters.  The keys below come from the model-29
 HA menu and were validated against /gateway/platform/deviceNew/iotGet.
 
-Writes are intentionally not implemented here.  The platform values are exposed
-read-only until the model-specific write semantics have been verified safely.
+Only the keys in ``WRITABLE_SETTINGS`` can be written, and every value goes
+through ``validate_setting_write`` first.  Options that would allow grid export
+are never offered or written (see ``GRID_EXPORT_REFUSED``).
 """
 from __future__ import annotations
+
+import math
+import re
 
 from homeassistant.const import PERCENTAGE, UnitOfElectricPotential, UnitOfPower
 
@@ -39,6 +43,8 @@ PLATFORM_SETTING_KEYS: list[str] = [
     "startDischgTime3", "endDischgTime3",
     "timePeriod3StopDischargingSoc", "timePeriod3StopDischargingV",
     "timePeriod3MaxDisChgPwr",
+    # Returned by the native iESS read; writable via WRITABLE_SETTINGS.
+    "generatorStartChg", "generatorMaxChgC",
 ]
 
 # Friendly mappings are limited to values established by the model-29 menu.
@@ -46,6 +52,7 @@ PLATFORM_SETTING_KEYS: list[str] = [
 VALUE_MAPS: dict[str, dict[str, str]] = {
     "workMode": {
         "1": "On Grid",
+        "2": "Limit power to UPS load",
         "3": "Limit power to home load",
     },
     "gridCharging": {"0": "Off", "1": "On"},
@@ -168,3 +175,179 @@ def decode_setting_value(key: str, raw, dynamic_options: dict | None = None):
         return int(value) if value.is_integer() else value
 
     return raw_text
+
+
+# ---------------------------------------------------------------------------
+# Writes.  Strict allow-list built from the model-29 HA menu metadata
+# (/gateway/app/ha/menu: min_val/max_val/optVal) and live iESS captures.
+# Anything not listed here (power on/off, restart, password, N-PE, P-PF curve,
+# date/time, ...) is refused.  See docs/hess-hy-s-12k-s-writes.md.
+#
+# Wire format (captured from the native iESS app and live-validated):
+#   POST /platform/deviceNew/iotSet  {"devType":"2","sn":..,"value":{key: v}}
+#   bool/int/enum -> JSON integer; voltages -> JSON number; times -> "HHMM" STRING
+#   (integer times are rejected by the device).
+# ---------------------------------------------------------------------------
+GRID_EXPORT_REFUSED: dict[str, set[int]] = {
+    # Option values that let the inverter feed the grid. Export is restricted or
+    # illegal in some regions and none of these was ever tested on hardware, so
+    # they are never offered or written.
+    "workMode": {1},               # On Grid (allows export)
+    "batDischgManagement": {3},    # Battery to grid sell
+    "pvChargingPriority": {2},     # First to grid
+}
+
+ENUM_OPTIONS: dict[str, dict[int, str]] = {
+    "workMode": {1: "On Grid", 2: "Limit power to UPS load", 3: "Limit power to home load"},
+    "batDischgManagement": {
+        0: "Standby", 1: "Battery to UPS load", 2: "Battery to home load",
+        3: "Battery to grid sell",
+    },
+    "pvChargingPriority": {0: "First to Load", 1: "First to charging", 2: "First to grid"},
+}
+for _slot in (1, 2, 3):
+    ENUM_OPTIONS[f"timePeriod{_slot}StopChargingEnergySource"] = {
+        0: "None", 1: "Grid charging", 2: "GEN charging", 3: "Grid GEN charging",
+    }
+
+WRITABLE_SETTINGS: dict[str, dict] = {
+    "chgSocLmt": {"kind": "int", "min": 50, "max": 100, "step": 1,
+                  "name": "Battery SOC Stop Charge Limit", "unit": "%"},
+    "gridCharging": {"kind": "bool", "name": "Grid Charging Control"},
+    "timedChargeEnable": {"kind": "bool", "name": "Timed Charge Control"},
+    "timedDischargeEnable": {"kind": "bool", "name": "Timed Discharge Control"},
+    "generatorStartChg": {"kind": "bool", "name": "Generator Charging Control"},
+    "generatorMaxChgC": {"kind": "float", "min": 0.0, "max": 60.0, "step": 1,
+                               "name": "Generator Max Charging Current Control", "unit": "A"},
+    # Hybrid grid mode: option 1 (On Grid, allows export) is refused by GRID_EXPORT_REFUSED.
+    "workMode": {"kind": "enum", "name": "Hybrid Grid Mode Control"},
+    "batDischgManagement": {"kind": "enum", "name": "Battery Energy Manage Control"},
+    "pvChargingPriority": {"kind": "enum", "name": "PV Energy Manage Control"},
+}
+for _slot in (1, 2, 3):
+    for _dir, _label, _soc, _v, _pwr in (
+        ("Chg", "Charge", "StopChargingSoc", "StopChargingV", "MaxChgPwr"),
+        ("Dischg", "Discharge", "StopDischargingSoc", "StopDischargingV", "MaxDisChgPwr"),
+    ):
+        _n = f"{_label} Slot {_slot}"
+        WRITABLE_SETTINGS.update({
+            f"start{_dir}Time{_slot}": {"kind": "hhmm", "name": f"{_n} Start Control", "slot": _slot},
+            f"end{_dir}Time{_slot}": {"kind": "hhmm", "name": f"{_n} End Control", "slot": _slot},
+            f"timePeriod{_slot}{_soc}": {"kind": "int", "min": 0, "max": 100, "step": 1,
+                                         "name": f"{_n} Stop SOC Control", "unit": "%", "slot": _slot},
+            f"timePeriod{_slot}{_v}": {"kind": "float", "min": 40.0, "max": 59.5, "step": 0.1,
+                                       "name": f"{_n} Stop Voltage Control", "unit": "V", "slot": _slot},
+            f"timePeriod{_slot}{_pwr}": {"kind": "int", "min": 0, "max": 12000, "step": 100,
+                                         "name": f"{_n} Max Power Control", "unit": "W", "slot": _slot},
+        })
+    WRITABLE_SETTINGS[f"timePeriod{_slot}StopChargingEnergySource"] = {
+        "kind": "enum", "name": f"Charge Slot {_slot} Energy Source Control", "slot": _slot,
+    }
+
+
+def allowed_options(key: str) -> dict[int, str]:
+    """Selectable options for an enum key (grid-export options are left out)."""
+    refused = GRID_EXPORT_REFUSED.get(key, set())
+    return {v: n for v, n in ENUM_OPTIONS.get(key, {}).items() if v not in refused}
+
+
+class SettingWriteError(ValueError):
+    """Raised when a model-29 setting write is refused before any request."""
+
+
+def _to_number(key: str, value) -> float:
+    if isinstance(value, bool):
+        return float(value)
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        raise SettingWriteError(f"{key}: {value!r} is not a number") from None
+    if not math.isfinite(number):
+        raise SettingWriteError(f"{key}: {value!r} is not a finite number")
+    return number
+
+
+def validate_setting_write(key: str, value):
+    """Return the value to send (int, float or "HHMM" str), or raise SettingWriteError.
+
+    Grid-export option values are always refused.
+    """
+    spec = WRITABLE_SETTINGS.get(key)
+    if spec is None:
+        raise SettingWriteError(f"Writing {key} is not enabled for HESS-HY-S-12K-S")
+    kind = spec["kind"]
+    if kind == "hhmm":
+        text = str(value).strip().replace(":", "")
+        if len(text) != 4 or not (text.isascii() and text.isdigit()):
+            raise SettingWriteError(f"{key}: {value!r} is not a time (HHMM)")
+        if int(text[:2]) > 23 or int(text[2:]) > 59:
+            raise SettingWriteError(f"{key}: {value!r} is not a valid time")
+        return text
+    number = _to_number(key, value)
+    if kind == "float":
+        if not spec["min"] <= number <= spec["max"]:
+            raise SettingWriteError(
+                f"{key}: {number} outside allowed range {spec['min']}-{spec['max']}"
+            )
+        return round(number, 1)
+    if number != int(number):
+        raise SettingWriteError(f"{key}: {value!r} must be a whole number")
+    number = int(number)
+    if kind == "bool":
+        if number not in (0, 1):
+            raise SettingWriteError(f"{key}: must be 0 or 1")
+        return number
+    if kind == "enum":
+        if number in GRID_EXPORT_REFUSED.get(key, set()):
+            raise SettingWriteError(
+                f"{key}={number} is refused: it allows grid export, which this integration "
+                "does not write"
+            )
+        if number not in ENUM_OPTIONS.get(key, {}):
+            raise SettingWriteError(f"{key}: {number} is not a valid option")
+        return number
+    if not spec["min"] <= number <= spec["max"]:
+        raise SettingWriteError(
+            f"{key}: {number} outside allowed range {spec['min']}-{spec['max']}"
+        )
+    return number
+
+
+_SCHEDULE_ENABLE = {
+    "timedChargeEnable": re.compile(
+        r"^(startChgTime|endChgTime)\d$"
+        r"|^timePeriod\d(StopChargingSoc|StopChargingV|MaxChgPwr|StopChargingEnergySource)$"
+    ),
+    "timedDischargeEnable": re.compile(
+        r"^(startDischgTime|endDischgTime)\d$"
+        r"|^timePeriod\d(StopDischargingSoc|StopDischargingV|MaxDisChgPwr)$"
+    ),
+}
+
+
+SCHEDULE_ENABLE = _SCHEDULE_ENABLE
+
+
+def plan_write_order(snapshot: dict) -> list[tuple[str, list[str]]]:
+    """Order a staged snapshot for writing: [(key, keys that must have applied first)].
+
+    A timed schedule must never run on a half-applied parameter set, so:
+    schedule disables go first; ordinary keys (including schedule parameters)
+    next; schedule enables last, each depending on every staged parameter of
+    that schedule.  An enable whose prerequisites failed is not written.
+    """
+    disables: list[tuple[str, list[str]]] = []
+    enables: list[tuple[str, list[str]]] = []
+    params = [k for k in snapshot if k not in _SCHEDULE_ENABLE]
+    for key, pattern in _SCHEDULE_ENABLE.items():
+        if key not in snapshot:
+            continue
+        try:
+            turning_on = float(snapshot[key]) == 1
+        except (TypeError, ValueError, OverflowError):
+            turning_on = False
+        if turning_on:
+            enables.append((key, [k for k in params if pattern.match(k)]))
+        else:
+            disables.append((key, []))
+    return disables + [(k, []) for k in params] + enables

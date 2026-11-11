@@ -9,6 +9,7 @@ from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.components import websocket_api
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.components import persistent_notification
 import homeassistant.helpers.device_registry as dr
 import homeassistant.helpers.config_validation as cv
 from .const import DOMAIN, PLATFORMS, BASE_URL
@@ -137,32 +138,51 @@ def _resolve_inverter_model(hass, entry, dev_model):
     return model
 
 
+async def _async_flush_staged_model_29(hass: HomeAssistant, entry) -> bool:
+    """Flush staged model-29 settings through the guarded, read-back-confirmed writer."""
+    staging = entry.runtime_data.staging
+    snapshot = staging.snapshot()
+    if not snapshot:
+        return True
+    settings = entry.runtime_data.settings
+    inverter_serial_number = entry.data["sn"]
+    if settings is None:
+        _LOGGER.error("[HANCHUESS] No model-29 settings coordinator for %s", inverter_serial_number)
+        return False
+    _LOGGER.info(
+        "[HANCHUESS] Writing %d staged model-29 setting(s): %s",
+        len(snapshot), list(snapshot),
+    )
+    errors = await settings.async_write_staged(staging)
+    if not errors:
+        _LOGGER.info("[HANCHUESS] Write Settings succeeded for %s", inverter_serial_number)
+        return True
+    _LOGGER.error("[HANCHUESS] Write Settings failed for %s: %s", inverter_serial_number, errors)
+    try:
+        # ``hass.components`` no longer exists in current Home Assistant.
+        persistent_notification.async_create(
+            hass,
+            (
+                f"Some settings could not be written to inverter **{inverter_serial_number}**.\n\n"
+                + "\n".join(f"- `{k}`: {v}" for k, v in errors.items())
+                + "\n\nThose changes are still staged — press **Write Settings** again to retry."
+            ),
+            title="Hanchuess — Write Settings Failed",
+            notification_id=f"hanchuess_write_failed_{inverter_serial_number}",
+        )
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.warning("[HANCHUESS] Could not create persistent notification: %s", err)
+    return False
+
+
 async def async_flush_staged(hass: HomeAssistant, entry) -> bool:
     """Flush all staged settings for ``entry`` to the device in one iotSet call.
 
     Returns True on success, False on failure.  On double failure a persistent
     notification is created and the buffer is left intact so the user can retry.
     """
-    if (
-        entry.runtime_data.inverter_model is not None
-        and entry.runtime_data.inverter_model.code == MODEL_12K_CODE
-    ):
-        _LOGGER.error(
-            "[HANCHUESS] Generic settings writes are disabled for HESS-HY-S-12K-S"
-        )
-        try:
-            hass.components.persistent_notification.async_create(
-                title="Hanchuess — Settings Write Blocked",
-                message=(
-                    "Generic settings writes are disabled for HESS-HY-S-12K-S. "
-                    "This model uses a different platform settings schema that is "
-                    "currently exposed read-only for safety."
-                ),
-                notification_id=f"hanchuess_write_blocked_{entry.data['sn']}",
-            )
-        except Exception as err:  # noqa: BLE001
-            _LOGGER.warning("[HANCHUESS] Could not create write-block notification: %s", err)
-        return False
+    if is_12k_s(entry):
+        return await _async_flush_staged_model_29(hass, entry)
 
     staging = entry.runtime_data.staging
     snapshot = staging.snapshot()
@@ -418,7 +438,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             entry is not None and is_12k_s(entry)
         ):
             _LOGGER.error(
-                "[HANCHUESS] fast_charge blocked for HESS-HY-S-12K-S during read-only validation"
+                "[HANCHUESS] fast_charge blocked for HESS-HY-S-12K-S"
             )
             return
 
@@ -596,7 +616,7 @@ async def ws_fast_charge(hass, connection, msg):
         connection.send_error(
             msg["id"],
             "unsupported_model_write",
-            "Fast charge/discharge is disabled for HESS-HY-S-12K-S during read-only validation",
+            "Fast charge/discharge is not supported for HESS-HY-S-12K-S",
         )
         return
 
@@ -627,7 +647,12 @@ async def ws_clear_staging(hass, connection, msg):
             msg["id"], "not_found", f"Device {inverter_serial_number} not found"
         )
         return
-    entry.runtime_data.staging.clear()
+    settings = entry.runtime_data.settings
+    if settings is not None:
+        # Waits for any flush in progress, then clears and refreshes entities.
+        await settings.async_clear_staged(entry.runtime_data.staging)
+    else:
+        entry.runtime_data.staging.clear()
     _LOGGER.debug("[HANCHUESS] Staging buffer cleared via WS for %s", inverter_serial_number)
     connection.send_result(msg["id"], {})
 

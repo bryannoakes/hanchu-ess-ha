@@ -58,14 +58,10 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: HanchuessConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     """Set up Read Settings and Write Settings button entities."""
-    entities = [HanchuessReadSettingsButton(hass, entry)]
-    if not is_12k_s(entry):
-        entities.append(HanchuessWriteSettingsButton(hass, entry))
-    else:
-        _LOGGER.info(
-            "[HANCHUESS] Write Settings button disabled for HESS-HY-S-12K-S"
-        )
-    async_add_entities(entities)
+    async_add_entities([
+        HanchuessReadSettingsButton(hass, entry),
+        HanchuessWriteSettingsButton(hass, entry),
+    ])
 
 
 # ---------------------------------------------------------------------------
@@ -108,8 +104,10 @@ class HanchuessReadSettingsButton(ButtonEntity):
                         "[HANCHUESS] Read Settings has no model-29 settings coordinator"
                     )
                     return
-                await coordinator.async_refresh()
-                if not coordinator.last_update_success:
+                if not await coordinator.async_refresh_settings(
+                    self._entry.runtime_data.staging
+                ):
+                    # Keep pending edits: nothing replaced them.
                     _LOGGER.warning("[HANCHUESS] Read Settings refresh failed")
                     return
                 _LOGGER.info(
@@ -137,7 +135,7 @@ class HanchuessReadSettingsButton(ButtonEntity):
 # ---------------------------------------------------------------------------
 
 class HanchuessWriteSettingsButton(ButtonEntity):
-    """Flushes all staged control-entity changes to the device via a single iotSet."""
+    """Flushes all staged control-entity changes to the device."""
 
     _attr_has_entity_name = True
     _attr_name = "Write Settings"

@@ -19,6 +19,10 @@ class ReauthRequired(Exception):
     """Raised when refresh_token returns 90076, requiring re-authentication."""
 
 
+class TokenExpired(Exception):
+    """Raised by platform settings reads when the cloud answers 401 and the caller asked for it."""
+
+
 class HanchuessApiClient:
     """Hanchuess API client."""
 
@@ -270,8 +274,12 @@ class HanchuessApiClient:
         dev_type: str,
         keys: list,
         language: str = "en",
+        raise_on_expired: bool = False,
     ) -> dict:
         """Read encrypted platform settings with the existing HA-scoped token.
+
+        With raise_on_expired=True a 401 raises TokenExpired so the caller can
+        refresh and retry; the default keeps the historical "empty dict" result.
 
         HESS-HY-S-12K-S/model 29 returns code 100 / data 900001 from the
         dedicated /app/ha/iotGet endpoint, while the same HA token succeeds
@@ -285,6 +293,8 @@ class HanchuessApiClient:
             send_as_json=False,
             extra_headers={"Content-Type": "text/plain", "version": "1.0"},
         )
+        if result and result.get("code") == 401 and raise_on_expired:
+            raise TokenExpired()
         if result and result.get("success"):
             return result.get("data", {})
         _LOGGER.warning(
@@ -293,6 +303,49 @@ class HanchuessApiClient:
             result.get("msg") if result else None,
         )
         return {}
+
+    async def async_platform_iot_set(
+        self, sn: str, dev_type: str, value: dict, language: str = "en"
+    ) -> dict:
+        """Write settings via the native encrypted /platform/deviceNew/iotSet.
+
+        Captured from the iESS web app: body {"devType","sn","value":{key:int}}.
+        Success only means the task was queued; callers must read back. A missing
+        answer is reported as ``uncertain`` (never retried here).
+        """
+        payload = _encrypt_payload({"sn": sn, "devType": dev_type, "value": value})
+        # No transport retries: a timeout can mean the cloud queued the write and
+        # only the answer was lost. Re-sending blindly would apply it twice, so
+        # the caller reads the device back before deciding anything.
+        result = await self._request(
+            "/gateway/platform/deviceNew/iotSet",
+            payload,
+            language=language,
+            send_as_json=False,
+            extra_headers={"Content-Type": "text/plain", "version": "1.0"},
+            retries=1,
+        )
+        if result is None:
+            return {
+                "success": False,
+                "uncertain": True,
+                "msg": "no answer from Hanchu; the write may or may not have been queued",
+            }
+        if result and result.get("code") == 401:
+            return {"success": False, "msg": "token_expired"}
+        data = (result or {}).get("data")
+        if (
+            result
+            and result.get("success")
+            and isinstance(data, dict)
+            and data.get("failCount", 0) == 0
+            and data.get("successCount", 0) >= 1
+        ):
+            return {"success": True, "data": data}
+        return {
+            "success": False,
+            "msg": (result or {}).get("msg") or "Request failed",
+        }
 
     async def async_fast_charge_discharge(self, sn: str, act: int, duration: int) -> dict:
         result = await self._request(

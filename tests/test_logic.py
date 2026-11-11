@@ -771,8 +771,12 @@ def test_12k_setting_decodes_numeric_units():
     assert decode_setting_value("timePeriod1MaxChgPwr", "6600") == 6600
 
 
+def test_12k_setting_decodes_work_mode_options():
+    assert decode_setting_value("workMode", "2") == "Limit power to UPS load"
+
+
 def test_12k_setting_preserves_unknown_enum_value():
-    assert decode_setting_value("workMode", "2") == "2"
+    assert decode_setting_value("workMode", "9") == "9"
 
 
 # ---------------------------------------------------------------------------
@@ -788,7 +792,7 @@ async def test_12k_read_settings_button_refreshes_settings_coordinator():
     entry.runtime_data.inverter_model = SimpleNamespace(code=29)
     entry.runtime_data.realtime = SimpleNamespace(client=AsyncMock())
     settings = MagicMock()
-    settings.async_refresh = AsyncMock()
+    settings.async_refresh_settings = AsyncMock(return_value=True)
     settings.last_update_success = True
     settings.data = {"chgSocLmt": "95"}
     entry.runtime_data.settings = settings
@@ -796,7 +800,7 @@ async def test_12k_read_settings_button_refreshes_settings_coordinator():
     button = HanchuessReadSettingsButton(MagicMock(), entry)
     await button.async_press()
 
-    settings.async_refresh.assert_awaited_once()
+    settings.async_refresh_settings.assert_awaited_once_with(entry.runtime_data.staging)
 
 
 def test_12k_setting_sensor_reads_current_coordinator_data():
@@ -875,3 +879,18 @@ def test_options_schema_omits_the_schedule_interval_for_model_29_only():
     model_29 = {str(k) for k in _options_schema({}, True).schema}
     assert "schedule_interval" in generic
     assert model_29 == generic - {"schedule_interval"}
+
+
+async def test_12k_read_settings_failure_keeps_pending_edits():
+    entry = _FakeEntryWithStaging()
+    entry.runtime_data.inverter_model = SimpleNamespace(code=29)
+    entry.runtime_data.realtime = SimpleNamespace(client=AsyncMock())
+    settings = MagicMock()
+    settings.async_refresh_settings = AsyncMock(return_value=False)  # cloud read failed
+    settings.last_update_success = False
+    entry.runtime_data.settings = settings
+    entry.runtime_data.staging.stage("chgSocLmt", 90)
+
+    await HanchuessReadSettingsButton(MagicMock(), entry).async_press()
+
+    assert entry.runtime_data.staging.snapshot() == {"chgSocLmt": 90}

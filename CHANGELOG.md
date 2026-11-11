@@ -17,24 +17,39 @@ later versions are tracked here going forward.
   CI (aiohttp 3.13) does not need it and the integration is unchanged.
 
 ### Added
-- HESS-HY-S-12K-S/model 29 now reads its real platform settings through
-  encrypted `/platform/deviceNew/iotGet` using the existing HA-scoped token.
-  The model-specific values are exposed read-only because its control schema
-  differs materially from the generic HA settings API.
-- Generic settings and fast charge/discharge write controls are suppressed and
-  server-side write paths are blocked for model 29.
-- API debug logging no longer prints response bodies, and the "unexpected status" error no
-  longer prints the payload (all models; only the status and response code are logged).
-- HESS-HY-S-12K-S: a model identified once is remembered, so a status response without
-  `devModel` cannot make the inverter look unknown and reopen the generic write paths. The
-  Inverter Status sensor's schedule poll is not started for this model (the generic keys it
-  reads are not answered by it) and its poll interval option is not shown.
+- HESS-HY-S-12K-S (model 29): settings are read through the encrypted
+  `/platform/deviceNew/iotGet` endpoint with the existing HA-scoped token (the generic
+  `/app/ha/iotGet` answers code 100 for this model) and shown as read-only diagnostic sensors.
+  The generic Work Mode, number, time and Fast Charge/Discharge controls are not created for
+  this model, and the generic write services/websocket commands refuse a model-29 target.
+- HESS-HY-S-12K-S: a strict allow-list of settings (`WRITABLE_SETTINGS`) is writable through
+  switch/select/number/time entities. Changes are staged like the generic controls; Write
+  Settings validates the whole set first (nothing is sent if any value is invalid), then writes
+  one key at a time through `/platform/deviceNew/iotSet` and confirms each by reading it back.
+  Times are sent as `"HHMM"` strings (integers are rejected by the device).
+- HESS-HY-S-12K-S: an enabled timed charge/discharge schedule is disabled before its times or
+  limits change and re-enabled last, only if every parameter confirmed; if one fails the
+  schedule is left disabled and the re-enable stays staged. Write Settings, Read Settings and
+  clearing the staged edits wait for each other; a value staged while an older one is being
+  written is kept and the outdated value is never sent; Read Settings only drops edits for
+  keys it re-read and keeps all edits if the read fails. `iotSet` is never retried
+  automatically: an unanswered write is read back and, if unconfirmed, reported as an unknown
+  outcome.
+- HESS-HY-S-12K-S: a 401 from the settings endpoints refreshes the token once and retries; a
+  second failure stops the flush and starts reauthentication. A 12K-S that was identified once
+  stays identified if a later status response omits `devModel`.
+- HESS-HY-S-12K-S: grid-export option values (Battery to grid sell, First to grid, On Grid)
+  are never offered or written.
+- Documentation: what is different for model 29 and why (`docs/hess-hy-s-12k-s.md`) and its
+  write protocol (`docs/hess-hy-s-12k-s-writes.md`).
+- HESS-HY-S-12K-S: the Inverter Status sensor's schedule poll is not started for this model
+  (the generic keys it reads are not answered by it) and its poll interval option is not
+  shown; the sensor uses the realtime data only.
 
 ### Fixed
-- HESS-HY-S-12K-S read-only settings sensors use the diagnostic entity category
-  (`EntityCategory.CONFIG` is rejected by Home Assistant for sensors, which left
-  all 40 unavailable). Read Settings refreshes a dedicated on-demand settings
-  coordinator so the sensors update after the button is pressed.
+- API debug logging no longer prints response bodies, and the "unexpected status" error no
+  longer prints the payload (all models; only the status and response code are logged).
+  `wkLink` (which contains the serial number) is redacted from diagnostics.
 
 ## [2.4.0] - 2026-11-11
 
@@ -48,8 +63,6 @@ later versions are tracked here going forward.
   sensor stops the extra poll. Based on @lancedfr's recipe (#33).
 
 ### Documentation
-- HESS-HY-S-12K-S (model 29): what is different for this model, why, and what was
-  verified (`docs/hess-hy-s-12k-s.md`).
 - Inverter status recipe: added a variant for systems controlled by
   Predbat's built-in Hanchu ESS integration, which uses `predbat.status` for
   the Scheduled Charge / Scheduled Discharge statuses, because Predbat's slot
