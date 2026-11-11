@@ -221,15 +221,16 @@ async def async_device_control_service(hass: HomeAssistant, call: ServiceCall) -
         return {"success": False, "message": message}
 
     entry = _find_entry(hass, inverter_serial_number)
+    # Blocked on the target's model alone: a caller-supplied dev_type must never
+    # decide whether the generic /app/ha/iotSet path is reachable.
     if (
-        dev_type == "2"
-        and entry is not None
+        entry is not None
         and entry.runtime_data.inverter_model is not None
         and entry.runtime_data.inverter_model.code == MODEL_12K_CODE
     ):
         message = (
             "Generic settings writes are disabled for HESS-HY-S-12K-S; "
-            "the model-specific platform schema is read-only until validated."
+            "use its model-specific setting entities and Write Settings."
         )
         _LOGGER.error("[HANCHUESS] device_control blocked: %s", message)
         return {"success": False, "message": message}
