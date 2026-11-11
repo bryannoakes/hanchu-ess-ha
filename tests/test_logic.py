@@ -772,8 +772,12 @@ def test_12k_setting_decodes_numeric_units():
     assert decode_setting_value("timePeriod1MaxChgPwr", "6600") == 6600
 
 
+def test_12k_setting_decodes_work_mode_options():
+    assert decode_setting_value("workMode", "2") == "Limit power to UPS load"
+
+
 def test_12k_setting_preserves_unknown_enum_value():
-    assert decode_setting_value("workMode", "2") == "2"
+    assert decode_setting_value("workMode", "9") == "9"
 
 
 # ---------------------------------------------------------------------------

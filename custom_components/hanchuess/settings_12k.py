@@ -48,6 +48,7 @@ PLATFORM_SETTING_KEYS: list[str] = [
 VALUE_MAPS: dict[str, dict[str, str]] = {
     "workMode": {
         "1": "On Grid",
+        "2": "Limit power to UPS load",
         "3": "Limit power to home load",
     },
     "gridCharging": {"0": "Off", "1": "On"},
@@ -212,8 +213,8 @@ WRITABLE_SETTINGS: dict[str, dict] = {
     "generatorStartChg": {"kind": "bool", "name": "Generator Charging Control"},
     "generatorMaxChgC": {"kind": "float", "min": 0.0, "max": 60.0, "step": 1,
                                "name": "Generator Max Charging Current Control", "unit": "A"},
-    # workMode is intentionally NOT writable yet: changing the hybrid grid mode can
-    # reconfigure grid interaction for the whole house and has not been live-tested.
+    # Hybrid grid mode: option 1 (On Grid, allows export) is refused by GRID_EXPORT_REFUSED.
+    "workMode": {"kind": "enum", "name": "Hybrid Grid Mode Control"},
     "batDischgManagement": {"kind": "enum", "name": "Battery Energy Manage Control"},
     "pvChargingPriority": {"kind": "enum", "name": "PV Energy Manage Control"},
 }

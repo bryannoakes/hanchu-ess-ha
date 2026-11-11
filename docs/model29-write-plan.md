@@ -82,7 +82,7 @@ HA menu `/app/ha/menu` metadata). Entities are generated from it (`settings_12k_
 | `timePeriodN{Stop*V}` | number 40-59.5 | yes all 6 | sent as float, e.g. 57.5 |
 | `timePeriodN{MaxChgPwr,MaxDisChgPwr}` | int 0-12000 | yes all 6 | |
 | `timePeriodNStopChargingEnergySource` | 0 none,1 grid,2 gen,3 grid+gen | yes 0/1 | slot 1 original is 1 (grid) |
-| `workMode` | 2,3 (1 refused) | **no** | deliberately NOT writable: may reconfigure grid interaction house-wide |
+| `workMode` | 2,3 (1 refused) | yes 3->2->3 (via HA select) | live 2026-11-11: grid stayed ~10 W import, no export, load steady; restored to 3 |
 
 Deliberately never writable: power on/off (`enPower`), restart (`pcsRestart`), password, Wi-Fi clear, date/time,
 N-PE, startup/reconnect gradients, P-PF curve, anything not in the allow-list. Slots 2/3 write entities are

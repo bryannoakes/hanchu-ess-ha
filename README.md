@@ -230,13 +230,22 @@ the generic Hanchu HA control API. On this model, `/app/ha/iotGet` can return
 code `100` / data `900001`, while the same HA-scoped token succeeds against
 the encrypted `/platform/deviceNew/iotGet` endpoint.
 
-For model 29 the integration therefore reads the platform settings schema and
-exposes those values as **read-only configuration sensors**. The generic Work
-Mode, number, time-slot, Write Settings, and Fast Charge/Discharge controls are
-not created for this model during validation. This is intentional: the 12K-S
-menu exposes separate Hybrid grid mode, Battery energy manage, PV energy manage,
-timed charge/discharge enables, and per-period limits whose semantics do not map
-safely to the generic writable controls.
+For model 29 the integration therefore uses the platform settings schema. All
+values are exposed as diagnostic sensors, and a strict allow-list of settings is
+writable through dedicated entities (switch / select / number / time): grid,
+timed charge/discharge and generator enables, Battery and PV energy manage,
+Hybrid grid mode, and the three charge and discharge periods (start/end times,
+stop SOC, stop voltage, max power, charge energy source). Every write is
+validated, sent through the encrypted `iotSet` endpoint and **confirmed by
+reading the value back**; an unconfirmed write raises an error.
+
+Grid export is never configurable from Home Assistant: "Battery to grid sell",
+"First to grid" and Hybrid grid mode "On Grid" are not offered and are refused
+if requested. Power on/off, restart, password, date/time and the other advanced
+settings are not writable. The generic Work Mode, Write Settings and Fast
+Charge/Discharge controls are not created for this model. Charge/discharge
+periods 2 and 3 are disabled by default in the entity registry. See
+`docs/model29-write-plan.md` for the full matrix.
 
 ### First-time setup
 

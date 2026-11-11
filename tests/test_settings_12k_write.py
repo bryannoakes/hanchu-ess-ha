@@ -37,7 +37,7 @@ OK = {
 
 
 @pytest.mark.parametrize("key", [
-    "R173", "workMode", "", "enPower", "pcsRestart", "passwordRead", "time", "enNpe", "activePwrSet",
+    "R173", "", "enPower", "pcsRestart", "passwordRead", "time", "enNpe", "activePwrSet",
     "stPLdSped", "reconPLdSped", "BAT_CLE_PWD", "DTU_RESTART", "devType",
 ])
 def test_everything_but_allowlisted_key_is_refused(key):
@@ -230,3 +230,14 @@ def test_platform_modules_import(platform):
     assert hasattr(mod, "async_setup_entry")
     if platform in ("number", "switch", "select", "time"):
         assert hasattr(mod, "build_entities")
+
+
+@pytest.mark.parametrize("value,expected", [(2, 2), (3, 3), ("3", 3)])
+def test_work_mode_accepts_only_non_export_options(value, expected):
+    assert validate_setting_write("workMode", value) == expected
+
+
+@pytest.mark.parametrize("value", [1, 0, 4, -1, "abc"])
+def test_work_mode_refuses_on_grid_and_unknown(value):
+    with pytest.raises(SettingWriteError):
+        validate_setting_write("workMode", value)

@@ -31,7 +31,7 @@ later versions are tracked here going forward.
   charge energy source). Times are sent as `"HHMM"` strings (integers are rejected
   by the device). Grid-export options (Battery to grid sell, First to grid, On Grid
   mode) are never offered or accepted. Slot 2/3 entities are disabled by default.
-  Hybrid grid mode stays read-only.
+  Hybrid grid mode (`workMode`) is writable for options 2 and 3 only; On Grid (1) is refused because it allows export.
 - Documentation: manual extraction (`docs/hess-hy-s-12k-s-manual.md`) and the
   model-29 write matrix (`docs/model29-write-plan.md`).
 
