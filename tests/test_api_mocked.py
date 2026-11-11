@@ -179,6 +179,26 @@ async def test_get_devices_empty_on_unsuccess(hass):
         m.post(DEVICE_LIST, payload={"success": False})
         devices = await client.async_get_devices()
     assert devices == []
+    assert client.devices_query_failed is True
+
+
+async def test_get_devices_empty_success_is_not_a_failure(hass):
+    client = HanchuessApiClient(hass, BASE_URL, token="t")
+    with aioresponses() as m:
+        m.post(DEVICE_LIST, payload={"success": True, "data": []})
+        assert await client.async_get_devices() == []
+    assert client.devices_query_failed is False
+
+
+async def test_get_devices_flag_clears_after_a_good_call(hass):
+    client = HanchuessApiClient(hass, BASE_URL, token="t")
+    with aioresponses() as m:
+        m.post(DEVICE_LIST, payload={"success": False})
+        m.post(DEVICE_LIST, payload={"success": True, "data": [{"sn": "SN1"}]})
+        await client.async_get_devices()
+        assert client.devices_query_failed is True
+        await client.async_get_devices()
+    assert client.devices_query_failed is False
 
 
 # ---------------------------------------------------------------------------
