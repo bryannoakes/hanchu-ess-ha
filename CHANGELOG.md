@@ -17,11 +17,14 @@ later versions are tracked here going forward.
   CI (aiohttp 3.13) does not need it and the integration is unchanged.
 
 ### Fixed
-- Load Power now uses `loadEpsPwr` with its explicit unit and falls back to
-  `loadPwr` when `loadEpsPwr` is absent. On the HESS-HY-S-12K-S `loadPwr` can
-  remain zero while `loadEpsPwr` reports the actual backed-house load. Sample
-  responses for models 2 and 4 carry the same value in both fields; other models
-  were not checked.
+- HESS-HY-S-12K-S (model 29): Load Power was always 0 because the inverter reports
+  `loadPwr` as 0 and puts the house load in `loadEpsPwr` (with its unit in
+  `loadEpsPwrUnit`). Example: `loadPwr` 0, `loadEpsPwr` 1.04, unit `kW` now gives
+  1040 W (PV + grid = load + battery closes with that number). The sensor falls back
+  to `loadPwr` if `loadEpsPwr` is absent or reads 0 while `loadPwr` reports a load.
+  Only model 29 changes: for other models it is not known whether `loadEpsPwr` is the
+  same quantity as `loadPwr` (sample responses for models 2 and 4 carry the same
+  value, but that is not proof for every model), so they keep reading `loadPwr`.
 
 ## [2.4.0] - 2026-11-11
 
