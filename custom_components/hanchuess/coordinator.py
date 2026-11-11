@@ -217,6 +217,7 @@ class HanchuessSettingsCoordinator(TimestampDataUpdateCoordinator):
                 errors[key] = str(err)
             else:
                 staging.discard([key])
+        self.async_update_listeners()  # entities drop their pending marker
         return errors
 
     async def async_write_setting(

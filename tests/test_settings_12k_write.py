@@ -86,6 +86,7 @@ def _coordinator(set_result, reads):
     client.async_platform_iot_get = AsyncMock(side_effect=reads)
     coord = HanchuessSettingsCoordinator.__new__(HanchuessSettingsCoordinator)
     coord.entry, coord.client, coord.data = entry, client, {"chgSocLmt": "98"}
+    coord.async_update_listeners = MagicMock()
     coord.async_set_updated_data = MagicMock(
         side_effect=lambda d: setattr(coord, "data", d)
     )
