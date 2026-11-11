@@ -130,7 +130,7 @@ class HanchuessConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 station_detail = await client.async_get_station_detail(
                     station_id, language
                 )
-                if not station_detail:
+                if not station_detail or station_detail.get("success") is not True:
                     errors["base"] = "battery_lookup_failed"
                     return self.async_show_form(
                         step_id="manual_serial",
