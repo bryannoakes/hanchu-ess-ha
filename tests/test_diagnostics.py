@@ -138,6 +138,22 @@ async def test_resolved_block_preserves_dev_type_redacts_sn():
     assert diag["resolved"]["sn"] == REDACTED
 
 
+async def test_model_29_settings_block_redacts_identifiers_keeps_settings():
+    # Model-29 settings come from platform iotGet; an identifier that slipped
+    # into that payload must be redacted while real settings stay readable.
+    entry = _FakeEntry()
+    entry.runtime_data = _make_runtime_data(
+        settings=SimpleNamespace(data={"sn": "SN123", "stationId": "st-1", "chgSocLmt": "97"}),
+    )
+
+    diag = await async_get_config_entry_diagnostics(MagicMock(), entry)
+
+    assert diag["settings"]["sn"] == REDACTED
+    assert diag["settings"]["stationId"] == REDACTED
+    assert diag["settings"]["chgSocLmt"] == "97"
+    assert "SN123" not in repr(diag) and "secret-token" not in repr(diag)
+
+
 async def test_redaction_reaches_nested_coordinator_data():
     entry = _FakeEntry()
     entry.runtime_data = _make_runtime_data(
