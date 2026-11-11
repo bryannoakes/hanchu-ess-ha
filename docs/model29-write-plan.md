@@ -100,3 +100,11 @@ Upstream samples (PR 11, 16, 17; devModel 2 and 4, June 2026): `loadPwr` (W) equ
 `loadEpsPwr` is the same aggregate with an explicit unit. Model 29 (Nov 2026): `loadPwr` = 0.0 while `loadEpsPwr` = 2.02 kW
 and PV 2.24 + grid 0.02 = load 2.02 + battery 0.24. Not separable from available data: model-29-specific vs a later Hanchu change.
 The sensor therefore prefers `loadEpsPwr` and falls back to `loadPwr`.
+
+## Staged writes (2026-11-11)
+Model-29 entities no longer write directly. Like the generic entities they validate and stage into
+`SettingsStagingBuffer` (showing the pending value, attribute `pending_write`); Write Settings /
+`hanchuess.write_settings` calls `HanchuessSettingsCoordinator.async_write_staged`, which writes one key at a time through
+`async_write_setting` (validate -> iotSet -> read-back). Confirmed keys leave staging, failed keys stay staged and are listed
+in a persistent notification. Read Settings discards staged edits. Live check: chgSocLmt 98 -> staged 97 (cloud unchanged,
+Pending Changes 1) -> Write Settings -> cloud 97 -> restaged 98 -> written -> cloud 98.
