@@ -6,6 +6,7 @@ module skips if it is unavailable.
 from datetime import time as dt_time
 import math
 from unittest.mock import AsyncMock, MagicMock
+from types import SimpleNamespace
 
 import pytest
 
@@ -28,6 +29,8 @@ from custom_components.hanchuess.sensor import (
     BatterySensor,
     BATTERY_SENSORS,
     _battery_temperature_count,
+    HanchuessReadOnlySettingSensor,
+    HanchuessSettingsLastRefreshSensor,
 )
 
 
@@ -742,3 +745,97 @@ def test_pending_sensor_resets_to_zero_after_clear():
 def test_pending_sensor_unique_id():
     sensor, _ = _make_pending_sensor("MYSERIAL")
     assert sensor.unique_id == "MYSERIAL_pending_settings_changes"
+
+
+# ---------------------------------------------------------------------------
+# HESS-HY-S-12K-S read-only settings decoder
+# ---------------------------------------------------------------------------
+
+from custom_components.hanchuess.settings_12k import decode_setting_value
+
+
+def test_12k_setting_decodes_hhmm():
+    assert decode_setting_value("startChgTime1", "0730") == "07:30"
+
+
+def test_12k_setting_decodes_zero_hhmm():
+    assert decode_setting_value("startDischgTime1", "0000") == "00:00"
+
+
+def test_12k_setting_decodes_known_mode():
+    assert decode_setting_value("batDischgManagement", "2") == "Battery to home load"
+
+
+def test_12k_setting_decodes_numeric_units():
+    assert decode_setting_value("chgSocLmt", "98") == 98
+    assert decode_setting_value("timePeriod1MaxChgPwr", "6600") == 6600
+
+
+def test_12k_setting_preserves_unknown_enum_value():
+    assert decode_setting_value("workMode", "2") == "2"
+
+
+# ---------------------------------------------------------------------------
+# Model-29 settings refresh coordinator wiring
+# ---------------------------------------------------------------------------
+
+from custom_components.hanchuess.button import HanchuessReadSettingsButton
+from custom_components.hanchuess.settings_12k import SETTING_SENSORS
+
+
+async def test_12k_read_settings_button_refreshes_settings_coordinator():
+    entry = _FakeEntryWithStaging()
+    entry.runtime_data.inverter_model = SimpleNamespace(code=29)
+    entry.runtime_data.realtime = SimpleNamespace(client=AsyncMock())
+    settings = MagicMock()
+    settings.async_refresh = AsyncMock()
+    settings.last_update_success = True
+    settings.data = {"chgSocLmt": "95"}
+    entry.runtime_data.settings = settings
+
+    button = HanchuessReadSettingsButton(MagicMock(), entry)
+    await button.async_press()
+
+    settings.async_refresh.assert_awaited_once()
+
+
+def test_12k_setting_sensor_reads_current_coordinator_data():
+    coordinator = MagicMock()
+    coordinator.data = {"chgSocLmt": "98"}
+    entry = _FakeEntryWithStaging()
+    sensor = HanchuessReadOnlySettingSensor(
+        coordinator,
+        entry,
+        "chgSocLmt",
+        SETTING_SENSORS["chgSocLmt"],
+    )
+
+    assert sensor.native_value == 98
+
+    coordinator.data = {"chgSocLmt": "95"}
+    assert sensor.native_value == 95
+
+
+def test_12k_settings_last_refresh_sensor_exposes_coordinator_timestamp():
+    from datetime import datetime, timezone
+
+    coordinator = MagicMock()
+    coordinator.last_update_success_time = datetime(2026, 11, 10, 14, 0, tzinfo=timezone.utc)
+    coordinator.last_update_success = True
+    coordinator.last_exception = None
+    coordinator.data = {"workMode": "3", "chgSocLmt": "98"}
+    entry = _FakeEntryWithStaging()
+
+    sensor = HanchuessSettingsLastRefreshSensor(coordinator, entry)
+
+    assert sensor.native_value == coordinator.last_update_success_time
+    assert sensor.extra_state_attributes["key_count"] == 2
+    assert sensor.extra_state_attributes["last_update_success"] is True
+
+
+def test_read_only_setting_sensor_category_is_valid_for_sensors():
+    """HA rejects sensor entities with entity_category=config at add time."""
+    from homeassistant.const import EntityCategory
+    from custom_components.hanchuess.sensor import HanchuessReadOnlySettingSensor
+
+    assert HanchuessReadOnlySettingSensor._attr_entity_category is not EntityCategory.CONFIG

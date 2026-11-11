@@ -77,6 +77,10 @@ async def async_get_config_entry_diagnostics(
         if model is not None
         else {"dev_model": (getattr(store.realtime, "data", None) or {}).get("devModel"), "name": None}
     )
+    settings = getattr(store, "settings", None)
+    diag["settings"] = async_redact_data(
+        getattr(settings, "data", None) or {}, TO_REDACT
+    )
     diag["startup_values"] = async_redact_data(
         store.startup_values or {}, TO_REDACT
     )

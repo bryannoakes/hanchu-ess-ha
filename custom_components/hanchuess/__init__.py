@@ -12,6 +12,7 @@ from homeassistant.exceptions import ConfigEntryNotReady
 import homeassistant.helpers.device_registry as dr
 import homeassistant.helpers.config_validation as cv
 from .const import DOMAIN, PLATFORMS, BASE_URL
+from .settings_12k import MODEL_CODE as MODEL_12K_CODE
 from .api import HanchuessApiClient
 from .battery import merge_battery_serials
 from .models import (
@@ -25,6 +26,7 @@ from .coordinator import (
     HanchuessStatisticsCoordinator,
     HanchuessBatteryCoordinator,
     HanchuessScheduleCoordinator,
+    HanchuessSettingsCoordinator,
 )
 from .staging import SettingsStagingBuffer
 
@@ -66,6 +68,7 @@ class HanchuessData:
     realtime: HanchuessRealtimeCoordinator
     statistics: HanchuessStatisticsCoordinator
     battery: HanchuessBatteryCoordinator | None
+    settings: HanchuessSettingsCoordinator | None
     number_limits: dict
     startup_values: dict
     staging: SettingsStagingBuffer
@@ -118,6 +121,27 @@ async def async_flush_staged(hass: HomeAssistant, entry) -> bool:
     Returns True on success, False on failure.  On double failure a persistent
     notification is created and the buffer is left intact so the user can retry.
     """
+    if (
+        entry.runtime_data.inverter_model is not None
+        and entry.runtime_data.inverter_model.code == MODEL_12K_CODE
+    ):
+        _LOGGER.error(
+            "[HANCHUESS] Generic settings writes are disabled for HESS-HY-S-12K-S"
+        )
+        try:
+            hass.components.persistent_notification.async_create(
+                title="Hanchuess — Settings Write Blocked",
+                message=(
+                    "Generic settings writes are disabled for HESS-HY-S-12K-S. "
+                    "This model uses a different platform settings schema that is "
+                    "currently exposed read-only for safety."
+                ),
+                notification_id=f"hanchuess_write_blocked_{entry.data['sn']}",
+            )
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.warning("[HANCHUESS] Could not create write-block notification: %s", err)
+        return False
+
     staging = entry.runtime_data.staging
     snapshot = staging.snapshot()
     if not snapshot:
@@ -194,6 +218,20 @@ async def async_device_control_service(hass: HomeAssistant, call: ServiceCall) -
     if not coordinator:
         message = f"Device {inverter_serial_number} not found"
         _LOGGER.error("[HANCHUESS] device_control: %s", message)
+        return {"success": False, "message": message}
+
+    entry = _find_entry(hass, inverter_serial_number)
+    if (
+        dev_type == "2"
+        and entry is not None
+        and entry.runtime_data.inverter_model is not None
+        and entry.runtime_data.inverter_model.code == MODEL_12K_CODE
+    ):
+        message = (
+            "Generic settings writes are disabled for HESS-HY-S-12K-S; "
+            "the model-specific platform schema is read-only until validated."
+        )
+        _LOGGER.error("[HANCHUESS] device_control blocked: %s", message)
         return {"success": False, "message": message}
 
     result = await coordinator.client.async_device_control(
@@ -354,6 +392,17 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             )
             return
 
+        entry = _find_entry(hass, inverter_serial_number)
+        if (
+            entry is not None
+            and entry.runtime_data.inverter_model is not None
+            and entry.runtime_data.inverter_model.code == MODEL_12K_CODE
+        ):
+            _LOGGER.error(
+                "[HANCHUESS] fast_charge blocked for HESS-HY-S-12K-S during read-only validation"
+            )
+            return
+
         result = await coordinator.client.async_fast_charge_discharge(
             inverter_serial_number, act, duration
         )
@@ -422,8 +471,23 @@ async def ws_iot_get(hass, connection, msg):
             msg["id"], "not_found", f"Device {inverter_serial_number} not found"
         )
         return
-    result = await coordinator.client.async_iot_get(inverter_serial_number, dev_type, keys)
     entry = _find_entry(hass, inverter_serial_number)
+    if (
+        entry is not None
+        and entry.runtime_data.inverter_model is not None
+        and entry.runtime_data.inverter_model.code == MODEL_12K_CODE
+    ):
+        result = await coordinator.client.async_platform_iot_get(
+            inverter_serial_number, dev_type, keys
+        )
+        settings_coordinator = entry.runtime_data.settings
+        if settings_coordinator is not None and result:
+            merged = {**(settings_coordinator.data or {}), **result}
+            settings_coordinator.async_set_updated_data(merged)
+    else:
+        result = await coordinator.client.async_iot_get(
+            inverter_serial_number, dev_type, keys
+        )
     if entry is not None:
         from .button import apply_iot_values
 
@@ -460,6 +524,19 @@ async def ws_iot_set(hass, connection, msg):
             msg["id"], "not_found", f"Device {inverter_serial_number} not found"
         )
         return
+    entry = _find_entry(hass, inverter_serial_number)
+    if (
+        entry is not None
+        and entry.runtime_data.inverter_model is not None
+        and entry.runtime_data.inverter_model.code == MODEL_12K_CODE
+    ):
+        connection.send_error(
+            msg["id"],
+            "unsupported_model_write",
+            "Generic settings writes are disabled for HESS-HY-S-12K-S",
+        )
+        return
+
     result = await coordinator.client.async_device_control(
         inverter_serial_number, dev_type, value
     )
@@ -497,6 +574,19 @@ async def ws_fast_charge(hass, connection, msg):
             msg["id"], "not_found", f"Device {inverter_serial_number} not found"
         )
         return
+    entry = _find_entry(hass, inverter_serial_number)
+    if (
+        entry is not None
+        and entry.runtime_data.inverter_model is not None
+        and entry.runtime_data.inverter_model.code == MODEL_12K_CODE
+    ):
+        connection.send_error(
+            msg["id"],
+            "unsupported_model_write",
+            "Fast charge/discharge is disabled for HESS-HY-S-12K-S during read-only validation",
+        )
+        return
+
     result = await coordinator.client.async_fast_charge_discharge(
         inverter_serial_number, msg["act"], msg["duration"]
     )
@@ -676,29 +766,40 @@ async def async_setup_entry(hass: HomeAssistant, entry: HanchuessConfigEntry) ->
                 menu_max,
             )
 
-    # Fetch all current values in one iotGet call — relies on the API
-    # client's own internal retry/timeout handling (see api.py)
+    # Model 29 uses an on-demand coordinator so startup and Read Settings
+    # share the same HA-native refresh path. Other models retain the generic
+    # one-shot iotGet startup read.
+    settings_coordinator = None
     startup_values = {}
     try:
-        startup_values = await client.async_iot_get(
-            inverter_serial_number,
-            "2",
-            [
-                "WORK_MODE_CMB",
-                "CHG_PWR_LMT",
-                "DSCHG_PWR_LMT",
-                "CHG_BAT_SOC_LMT",
-                "DSCHG_BAT_SOC_LMT",
-                "DTU_AC_CHG_SOC_LMT",
-                "TCT_START_1", "TCT_END_1",
-                "TCT_START_2", "TCT_END_2",
-                "TCT_START_3", "TCT_END_3",
-                "TDT_START_1", "TDT_END_1",
-                "TDT_START_2", "TDT_END_2",
-                "TDT_START_3", "TDT_END_3",
-            ]
-        )
-        _LOGGER.info("[HANCHUESS] Startup values fetched: %s", startup_values)
+        if inverter_model is not None and inverter_model.code == MODEL_12K_CODE:
+            settings_coordinator = HanchuessSettingsCoordinator(hass, entry, client)
+            await _async_initial_refresh(settings_coordinator, entry)
+            startup_values = settings_coordinator.data or {}
+            _LOGGER.info(
+                "[HANCHUESS] Model-29 settings coordinator loaded %d keys",
+                len(startup_values),
+            )
+        else:
+            startup_values = await client.async_iot_get(
+                inverter_serial_number,
+                "2",
+                [
+                    "WORK_MODE_CMB",
+                    "CHG_PWR_LMT",
+                    "DSCHG_PWR_LMT",
+                    "CHG_BAT_SOC_LMT",
+                    "DSCHG_BAT_SOC_LMT",
+                    "DTU_AC_CHG_SOC_LMT",
+                    "TCT_START_1", "TCT_END_1",
+                    "TCT_START_2", "TCT_END_2",
+                    "TCT_START_3", "TCT_END_3",
+                    "TDT_START_1", "TDT_END_1",
+                    "TDT_START_2", "TDT_END_2",
+                    "TDT_START_3", "TDT_END_3",
+                ],
+            )
+            _LOGGER.info("[HANCHUESS] Startup values fetched: %s", startup_values)
     except Exception as err:
         _LOGGER.warning("[HANCHUESS] Could not fetch startup values: %s", err)
         
@@ -723,6 +824,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: HanchuessConfigEntry) ->
         realtime=coordinator,
         statistics=stats_coordinator,
         battery=battery_coordinator,
+        settings=settings_coordinator,
         number_limits=number_limits,
         startup_values=startup_values,
         staging=SettingsStagingBuffer(),
@@ -734,7 +836,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: HanchuessConfigEntry) ->
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    if startup_values:
+    if startup_values and settings_coordinator is None:
         from .button import apply_iot_values
         apply_iot_values(entry, startup_values)
         _LOGGER.info(

@@ -54,6 +54,7 @@ def _make_runtime_data(**overrides):
         "realtime": SimpleNamespace(data={}),
         "statistics": SimpleNamespace(data={}),
         "battery": None,
+        "settings": None,
         "number_limits": {},
         "startup_values": {},
         "staging": SettingsStagingBuffer(),
@@ -96,6 +97,7 @@ async def test_full_diagnostics_includes_all_sections():
         "battery",
         "number_limits",
         "inverter_model",
+        "settings",
         "startup_values",
     }
     assert diag["device_status"] == {"batSoc": 55, "loadPwr": 800}
@@ -105,6 +107,7 @@ async def test_full_diagnostics_includes_all_sections():
     assert diag["battery"]["payload_count"] == 1
     assert diag["battery"]["payload"]["battery_1"]["tBat1"] == 23.5
     assert diag["battery"]["payload"]["battery_1"]["sn"] == REDACTED
+    assert diag["settings"] == {}
     assert diag["startup_values"] == {"WORK_MODE_CMB": "1"}
 
 

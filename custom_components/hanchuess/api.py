@@ -74,6 +74,7 @@ class HanchuessApiClient:
         language: str = "en",
         retries: int = 3,
         send_as_json: bool = True,
+        extra_headers: dict | None = None,
     ) -> dict:
         url = f"{self._domain}{path}"
         _LOGGER.debug("[HANCHUESS] request: %s token=%s", url, "yes" if self._token else "no")
@@ -85,6 +86,8 @@ class HanchuessApiClient:
                 if not send_as_json:
                     headers.pop("Content-Type", None)
                     request_kwargs = {"data": data}
+                if extra_headers:
+                    headers.update(extra_headers)
 
                 async with async_timeout.timeout(15):
                     session = async_get_clientsession(self._hass)
@@ -254,6 +257,38 @@ class HanchuessApiClient:
         )
         if result and result.get("success"):
             return result.get("data", {})
+        return {}
+
+    async def async_platform_iot_get(
+        self,
+        sn: str,
+        dev_type: str,
+        keys: list,
+        language: str = "en",
+    ) -> dict:
+        """Read encrypted platform settings with the existing HA-scoped token.
+
+        HESS-HY-S-12K-S/model 29 returns code 100 / data 900001 from the
+        dedicated /app/ha/iotGet endpoint, while the same HA token succeeds
+        against /platform/deviceNew/iotGet when appPlat remains "ha".
+        """
+        payload = _encrypt_payload({"sn": sn, "devType": dev_type, "keys": keys})
+        result = await self._request(
+            "/gateway/platform/deviceNew/iotGet",
+            payload,
+            language=language,
+            send_as_json=False,
+            extra_headers={"Content-Type": "text/plain", "version": "1.0"},
+        )
+        if result and result.get("success"):
+            return result.get("data", {})
+        _LOGGER.warning(
+            "[HANCHUESS] platform iotGet failed for %s: code=%s msg=%s data=%s",
+            sn,
+            result.get("code") if result else None,
+            result.get("msg") if result else None,
+            result.get("data") if result else None,
+        )
         return {}
 
     async def async_fast_charge_discharge(self, sn: str, act: int, duration: int) -> dict:

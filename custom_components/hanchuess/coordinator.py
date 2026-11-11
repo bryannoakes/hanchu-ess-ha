@@ -4,10 +4,15 @@ import logging
 from datetime import timedelta
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.helpers.update_coordinator import (
+    DataUpdateCoordinator,
+    TimestampDataUpdateCoordinator,
+    UpdateFailed,
+)
 from homeassistant.util import dt as dt_util
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from .api import HanchuessApiClient, ReauthRequired
+from .settings_12k import PLATFORM_SETTING_KEYS
 from .const import (
     DOMAIN,
     CONF_REALTIME_INTERVAL,
@@ -142,6 +147,44 @@ class HanchuessStatisticsCoordinator(DataUpdateCoordinator):
             self.hass.config_entries.async_update_entry(
                 entry, data={**entry.data, "token": token}
             )
+
+
+class HanchuessSettingsCoordinator(TimestampDataUpdateCoordinator):
+    """On-demand model-29 settings coordinator.
+
+    Settings are intentionally not polled periodically. They refresh at startup
+    and whenever the Read Settings button is pressed.
+    """
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, client: HanchuessApiClient):
+        super().__init__(
+            hass,
+            _LOGGER,
+            name="hanchuess_settings",
+            config_entry=entry,
+            update_interval=None,
+        )
+        self.entry = entry
+        self.client = client
+
+    async def _async_update_data(self) -> dict:
+        inverter_serial_number = self.entry.data["sn"]
+        language = self.hass.config.language or "en"
+
+        data = await self.client.async_platform_iot_get(
+            inverter_serial_number,
+            "2",
+            PLATFORM_SETTING_KEYS,
+            language=language,
+        )
+        if not data:
+            raise UpdateFailed("Failed to get model-29 settings")
+        _LOGGER.info(
+            "[HANCHUESS] Model-29 settings refresh returned %d keys: %s",
+            len(data),
+            data,
+        )
+        return data
 
 
 class HanchuessBatteryCoordinator(DataUpdateCoordinator):

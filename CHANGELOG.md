@@ -16,6 +16,20 @@ later versions are tracked here going forward.
   aiohttp 3.14 requires, so a small shim in `tests/conftest.py` supplies it. Test code only;
   CI (aiohttp 3.13) does not need it and the integration is unchanged.
 
+### Added
+- HESS-HY-S-12K-S/model 29 now reads its real platform settings through
+  encrypted `/platform/deviceNew/iotGet` using the existing HA-scoped token.
+  The model-specific values are exposed read-only because its control schema
+  differs materially from the generic HA settings API.
+- Generic settings and fast charge/discharge write controls are suppressed and
+  server-side write paths are blocked for model 29.
+
+### Fixed
+- HESS-HY-S-12K-S read-only settings sensors use the diagnostic entity category
+  (`EntityCategory.CONFIG` is rejected by Home Assistant for sensors, which left
+  all 40 unavailable). Read Settings refreshes a dedicated on-demand settings
+  coordinator so the sensors update after the button is pressed.
+
 ## [2.4.0] - 2026-11-11
 
 ### Added

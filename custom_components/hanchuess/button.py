@@ -10,6 +10,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .models import inverter_model_name
 from .const import DOMAIN
+from .settings_12k import is_12k_s
 from . import HanchuessConfigEntry
 
 _LOGGER = logging.getLogger(__name__)
@@ -57,10 +58,14 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: HanchuessConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     """Set up Read Settings and Write Settings button entities."""
-    async_add_entities([
-        HanchuessReadSettingsButton(hass, entry),
-        HanchuessWriteSettingsButton(hass, entry),
-    ])
+    entities = [HanchuessReadSettingsButton(hass, entry)]
+    if not is_12k_s(entry):
+        entities.append(HanchuessWriteSettingsButton(hass, entry))
+    else:
+        _LOGGER.info(
+            "[HANCHUESS] Write Settings button disabled for HESS-HY-S-12K-S"
+        )
+    async_add_entities(entities)
 
 
 # ---------------------------------------------------------------------------
@@ -96,6 +101,23 @@ class HanchuessReadSettingsButton(ButtonEntity):
         client = self._entry.runtime_data.realtime.client
         _LOGGER.info("[HANCHUESS] Read Settings pressed for %s", inverter_serial_number)
         try:
+            if is_12k_s(self._entry):
+                coordinator = self._entry.runtime_data.settings
+                if coordinator is None:
+                    _LOGGER.error(
+                        "[HANCHUESS] Read Settings has no model-29 settings coordinator"
+                    )
+                    return
+                await coordinator.async_refresh()
+                if not coordinator.last_update_success:
+                    _LOGGER.warning("[HANCHUESS] Read Settings refresh failed")
+                    return
+                _LOGGER.info(
+                    "[HANCHUESS] Read Settings refreshed %d model-29 values at %s",
+                    len(coordinator.data or {}),
+                    coordinator.last_update_success_time,
+                )
+                return
             values = await client.async_iot_get(
                 inverter_serial_number, "2", ALL_CONTROL_KEYS
             )
